@@ -46,22 +46,29 @@ struct MenuView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            tabStrip
-            totals
-            chart
-            picker
-            if selectedAgent == nil { rowsToggle }
-            rows
-            Divider().padding(.horizontal, 16)
-            blockSection
-            Divider().padding(.horizontal, 16)
-            awakeSection
-            Divider().padding(.horizontal, 16)
-            footer
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                tabStrip
+                totals
+                chart
+                picker
+                if selectedAgent == nil { rowsToggle }
+                rows
+                Divider().padding(.horizontal, 16)
+                blockSection
+                Divider().padding(.horizontal, 16)
+                awakeSection
+                Divider().padding(.horizontal, 16)
+                footer
+            }
+            .frame(width: 316)
+            if limitsPanelOpen, selectedAgent == nil {
+                Divider()
+                limitsPanel
+            }
         }
-        .frame(width: 316)
+        .animation(.snappy(duration: 0.18), value: limitsPanelOpen)
         .onAppear { store.refreshIfStale() }
     }
 
@@ -539,12 +546,13 @@ struct MenuView: View {
 
     /// Each provider has its own limit system: Claude gets the local 5h-block
     /// estimate, Codex gets the server-reported quota from its session logs.
+    /// On the All tab this collapses to one summary line; hovering it opens
+    /// the side panel with the full per-provider breakdown.
     private var blockSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             switch selectedAgent {
             case nil:
-                claudeBlockContent
-                codexQuotaContent
+                limitsSummaryRow
             case "claude":
                 claudeBlockContent
             case "codex":
@@ -558,6 +566,87 @@ struct MenuView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    // MARK: Limits summary (All tab) + hover side panel
+
+    @State private var limitsPanelOpen = false
+    @State private var panelHideTask: Task<Void, Never>?
+
+    private func setLimitsPanel(hovering: Bool) {
+        panelHideTask?.cancel()
+        panelHideTask = nil
+        if hovering {
+            limitsPanelOpen = true
+        } else {
+            // Grace period so the pointer can travel from the summary row
+            // into the panel without it collapsing mid-flight.
+            panelHideTask = Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                guard !Task.isCancelled else { return }
+                limitsPanelOpen = false
+            }
+        }
+    }
+
+    private var claudeWorstPercent: Double? {
+        if let quota = store.snapshot?.claudeQuota,
+           let worst = quota.windows.map(\.usedPercent).max() {
+            return worst
+        }
+        if let block = store.snapshot?.activeBlock, block.end > .now {
+            return block.percentUsed
+        }
+        return nil
+    }
+
+    private var codexWorstPercent: Double? {
+        store.snapshot?.codexQuota?.windows.map(\.usedPercent).max()
+    }
+
+    private var limitsSummaryRow: some View {
+        HStack(spacing: 10) {
+            Text("Limits")
+                .font(.system(size: 11, weight: .medium))
+            providerPill(agent: "claude", percent: claudeWorstPercent)
+            providerPill(agent: "codex", percent: codexWorstPercent)
+            Spacer()
+            Text(limitsPanelOpen ? "›" : "details ›")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .onHover { setLimitsPanel(hovering: $0) }
+    }
+
+    private func providerPill(agent: String, percent: Double?) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(AgentPalette.color(for: agent).opacity(percent == nil ? 0.4 : 1))
+                .frame(width: 6, height: 6)
+            Text(percent.map { "\(Int($0.rounded()))%" } ?? "–")
+                .font(.system(size: 10, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(percent.map { meterColor(percent: $0, status: "ok") } ?? .secondary)
+        }
+    }
+
+    private var limitsPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Provider limits")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+            claudeBlockContent
+            Divider()
+            codexQuotaContent
+            Divider()
+            placeholderRow("OpenCode", detail: "pay-per-token · no window")
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(width: 248, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .onHover { setLimitsPanel(hovering: $0) }
     }
 
     @ViewBuilder
