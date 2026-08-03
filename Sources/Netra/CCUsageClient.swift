@@ -127,6 +127,9 @@ actor CCUsageClient {
 
         // Next to the executable (bundled), and at the SwiftPM package root
         // (…/​.build/debug/Netra → three levels up) for `swift run` during development.
+        if let resources = Bundle.main.resourceURL {
+            candidates.append(resources.appendingPathComponent("ccusage-bin"))
+        }
         if let exe = Bundle.main.executableURL {
             let exeDir = exe.deletingLastPathComponent()
             candidates.append(exeDir.appendingPathComponent("ccusage-bin"))

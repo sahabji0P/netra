@@ -3,12 +3,34 @@
 macOS menu-bar app: a glanceable view of coding-agent token usage and estimated
 cost, plus agent-aware keep-awake. Vision doc: `../netra-product-vision.html`.
 
-## Run
+## Install (Homebrew)
 
 ```sh
-./run.sh          # build + (re)start in the menu bar
-pkill -f Netra    # stop
+brew tap sahabji0P/tap
+brew install --cask --no-quarantine netra   # --no-quarantine until notarized
 ```
+
+Update later with `brew upgrade netra`. The app shows a quiet notice in its
+footer when a newer release exists.
+
+## Develop
+
+```sh
+./run.sh          # debug build + (re)start in the menu bar
+pkill -f Netra    # stop
+swift test        # contract tests against captured fixtures
+```
+
+## Release (maintainer)
+
+```sh
+scripts/build-app.sh 0.1.0    # assemble + sign dist/Netra.app
+scripts/release.sh 0.1.0      # zip → GitHub Release → bump Homebrew cask
+```
+
+`release.sh` notarizes when `NETRA_NOTARY_PROFILE` is set (paid Apple
+Developer membership); otherwise it releases un-notarized and the cask's
+`--no-quarantine` caveat applies.
 
 ## Layout
 

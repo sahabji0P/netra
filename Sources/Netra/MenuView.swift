@@ -9,6 +9,8 @@ enum RowsMode: String, CaseIterable {
 struct MenuView: View {
     @Bindable var store: UsageStore
     @Bindable var awake: AwakeController
+    var updates: UpdateChecker
+    @State private var launchAtLogin = LaunchAtLogin.isEnabled
 
     // Internal, not private: `private` members aren't visible to the chart and
     // limits extensions in the sibling files.
@@ -438,21 +440,52 @@ struct MenuView: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack {
-            footerButton("arrow.clockwise", "Refresh") {
-                Task { await store.refresh(forceQuota: true) }
+        VStack(spacing: 8) {
+            if let version = updates.availableVersion {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 10))
+                    Text("v\(version) available · brew upgrade netra")
+                        .font(.system(size: 10, weight: .medium))
+                    Spacer()
+                }
+                .foregroundStyle(Color.accentColor)
             }
-            Spacer()
-            footerButton("moon.fill", "Lock & Sleep") {
-                awake.lockAndSleep()
+            if LaunchAtLogin.isAvailable {
+                HStack {
+                    Text("Launch at login")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { launchAtLogin },
+                        set: { on in
+                            LaunchAtLogin.set(on)
+                            launchAtLogin = LaunchAtLogin.isEnabled
+                        }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+                }
             }
-            Spacer()
-            footerButton("power", "Quit") {
-                NSApplication.shared.terminate(nil)
+            HStack {
+                footerButton("arrow.clockwise", "Refresh") {
+                    Task { await store.refresh(forceQuota: true) }
+                }
+                Spacer()
+                footerButton("moon.fill", "Lock & Sleep") {
+                    awake.lockAndSleep()
+                }
+                Spacer()
+                footerButton("power", "Quit") {
+                    NSApplication.shared.terminate(nil)
+                }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .onAppear { launchAtLogin = LaunchAtLogin.isEnabled }
     }
 
     private func footerButton(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {
