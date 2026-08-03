@@ -31,7 +31,8 @@ ditto -c -k --keepParent dist/Netra.app "$ZIP"
 SHA256=$(shasum -a 256 "$ZIP" | awk '{print $1}')
 echo "sha256: $SHA256"
 
-git tag "v${VERSION}" 2>/dev/null || echo "(tag v${VERSION} already exists)"
+# -c tag.gpgSign=false: signed tags hang without an interactive GPG prompt.
+git -c tag.gpgSign=false tag "v${VERSION}" 2>/dev/null || echo "(tag v${VERSION} already exists)"
 git push origin "v${VERSION}"
 gh release create "v${VERSION}" "$ZIP" \
   --title "Netra ${VERSION}" \
