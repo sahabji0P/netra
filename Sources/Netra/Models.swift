@@ -17,6 +17,16 @@ struct CCRow: Decodable {
     var totalTokens: Int
     var totalCost: Double
     var agents: [CCAgentRow]?
+    var modelBreakdowns: [CCModelBreakdown]?
+}
+
+struct CCModelBreakdown: Decodable {
+    var modelName: String
+    var cost: Double
+    var inputTokens: Int
+    var outputTokens: Int
+    var cacheCreationTokens: Int
+    var cacheReadTokens: Int
 }
 
 struct CCAgentRow: Decodable {
@@ -38,6 +48,20 @@ struct AgentStat: Codable, Hashable, Identifiable, Sendable {
     var id: String { name }
 }
 
+struct ModelStat: Codable, Hashable, Identifiable, Sendable {
+    var name: String
+    var cost: Double
+    var totalTokens: Int
+    var id: String { name }
+}
+
+struct DayPoint: Codable, Hashable, Identifiable, Sendable {
+    var date: Date
+    var cost: Double
+    var totalTokens: Int
+    var id: Date { date }
+}
+
 struct PeriodStat: Codable, Hashable, Sendable {
     var period: String
     var cost: Double
@@ -47,10 +71,11 @@ struct PeriodStat: Codable, Hashable, Sendable {
     var cacheCreationTokens: Int
     var totalTokens: Int
     var agents: [AgentStat]
+    var models: [ModelStat]
 
     static let zero = PeriodStat(
         period: "", cost: 0, inputTokens: 0, outputTokens: 0,
-        cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0, agents: []
+        cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0, agents: [], models: []
     )
 }
 
@@ -59,6 +84,7 @@ struct UsageSnapshot: Codable, Sendable {
     var today: PeriodStat
     var week: PeriodStat
     var month: PeriodStat
+    var history: [DayPoint]
 
     init(fetchedAt: Date, report: CCUnifiedReport, now: Date = .now, calendar: Calendar = .current) {
         self.fetchedAt = fetchedAt
@@ -78,11 +104,20 @@ struct UsageSnapshot: Codable, Sendable {
             let agents = (row.agents ?? [])
                 .map { AgentStat(name: $0.agent, cost: $0.totalCost, totalTokens: $0.totalTokens) }
                 .sorted { $0.cost > $1.cost }
+            let models = (row.modelBreakdowns ?? [])
+                .map {
+                    ModelStat(
+                        name: $0.modelName, cost: $0.cost,
+                        totalTokens: $0.inputTokens + $0.outputTokens
+                            + $0.cacheCreationTokens + $0.cacheReadTokens
+                    )
+                }
+                .sorted { $0.cost > $1.cost }
             return PeriodStat(
                 period: row.period, cost: row.totalCost,
                 inputTokens: row.inputTokens, outputTokens: row.outputTokens,
                 cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
-                totalTokens: row.totalTokens, agents: agents
+                totalTokens: row.totalTokens, agents: agents, models: models
             )
         }
 
@@ -91,13 +126,11 @@ struct UsageSnapshot: Codable, Sendable {
         today = stat(report.daily?.first { $0.period == todayKey })
         week = stat(report.weekly?.last)
         month = stat(report.monthly?.first { $0.period == monthKey })
-    }
 
-    init(fetchedAt: Date, today: PeriodStat, week: PeriodStat, month: PeriodStat) {
-        self.fetchedAt = fetchedAt
-        self.today = today
-        self.week = week
-        self.month = month
+        history = (report.daily ?? []).compactMap { row in
+            guard let date = dayFormatter.date(from: row.period) else { return nil }
+            return DayPoint(date: date, cost: row.totalCost, totalTokens: row.totalTokens)
+        }
     }
 }
 
