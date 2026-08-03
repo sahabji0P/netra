@@ -85,6 +85,9 @@ struct MenuView: View {
         HStack(spacing: 6) {
             Text("Netra")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
+            Text("v\(updates.currentVersion ?? "dev")")
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
             Spacer()
             if store.state == .refreshing {
                 ProgressView()
