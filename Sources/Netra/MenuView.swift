@@ -14,6 +14,7 @@ struct MenuView: View {
     @State private var selectedAgent: String?   // nil = Overview
     @State private var rowsMode: RowsMode = .agents
     @State private var hoveredPeriod: String?
+    @State private var selectedPeriod: String?   // pinned by clicking a bar
 
     // MARK: Derived data
 
@@ -21,10 +22,20 @@ struct MenuView: View {
         store.snapshot?.currentRow(for: tab) ?? .zero()
     }
 
-    /// (cost, tokens, models) for the current tab, filtered to the selected agent.
+    /// The row driving every stat on screen: a pinned bar if one is clicked,
+    /// otherwise the current day/week/month.
+    private var displayedRow: PeriodRow {
+        if let selectedPeriod,
+           let row = store.snapshot?.rows(for: tab).first(where: { $0.period == selectedPeriod }) {
+            return row
+        }
+        return currentRow
+    }
+
+    /// (cost, tokens, models) for the displayed row, filtered to the selected agent.
     private var agentStat: AgentStat? {
         guard let selectedAgent else { return nil }
-        return currentRow.agentStat(selectedAgent)
+        return displayedRow.agentStat(selectedAgent)
             ?? AgentStat(name: selectedAgent, cost: 0, totalTokens: 0, models: [])
     }
 
@@ -87,16 +98,17 @@ struct MenuView: View {
     // MARK: Agent tabs
 
     private var tabStrip: some View {
-        HStack(spacing: 4) {
-            tabChip("Overview", isSelected: selectedAgent == nil) { selectedAgent = nil }
-            ForEach(agentNames, id: \.self) { name in
-                tabChip(AgentPalette.shortName(name), isSelected: selectedAgent == name) {
-                    selectedAgent = name
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 3) {
+                tabChip("All", isSelected: selectedAgent == nil) { selectedAgent = nil }
+                ForEach(agentNames, id: \.self) { name in
+                    tabChip(AgentPalette.shortName(name), isSelected: selectedAgent == name) {
+                        selectedAgent = name
+                    }
                 }
             }
-            Spacer()
+            .padding(.horizontal, 12)
         }
-        .padding(.horizontal, 12)
         .padding(.top, 10)
     }
 
@@ -104,8 +116,9 @@ struct MenuView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 10.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-                .padding(.horizontal, 8)
+                .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .fixedSize()
+                .padding(.horizontal, 7)
                 .padding(.vertical, 4)
                 .background(isSelected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
         }
@@ -116,7 +129,7 @@ struct MenuView: View {
 
     private var displayedCost: Double {
         if let hovered = hoveredChartPoint { return hovered.cost }
-        return agentStat?.cost ?? currentRow.cost
+        return agentStat?.cost ?? displayedRow.cost
     }
 
     private var totals: some View {
@@ -143,7 +156,8 @@ struct MenuView: View {
         if let hovered = hoveredChartPoint {
             return scope + "est. API cost · \(hovered.label)"
         }
-        return scope + "est. API-equivalent cost · \(periodCaption)"
+        let pin = selectedPeriod == nil ? "" : " · pinned"
+        return scope + "est. API-equivalent cost · \(periodCaption)" + pin
     }
 
     private var tokensLine: String {
@@ -153,19 +167,23 @@ struct MenuView: View {
         if let agentStat {
             return "\(Format.tokens(agentStat.totalTokens)) tokens"
         }
-        return "\(Format.tokens(currentRow.inputTokens)) in · \(Format.tokens(currentRow.outputTokens)) out · \(Format.tokens(currentRow.cacheReadTokens)) cached"
+        return "\(Format.tokens(displayedRow.inputTokens)) in · \(Format.tokens(displayedRow.outputTokens)) out · \(Format.tokens(displayedRow.cacheReadTokens)) cached"
     }
 
     private var periodCaption: String {
         let calendar = Calendar.current
         switch tab {
         case .today:
-            return "today"
+            if selectedPeriod == nil { return "today" }
+            return displayedRow.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
         case .week:
-            let week = calendar.component(.weekOfYear, from: currentRow.date)
-            return "W\(week) · week of \(currentRow.date.formatted(.dateTime.day().month(.abbreviated)))"
+            let week = calendar.component(.weekOfYear, from: displayedRow.date)
+            return "W\(week) · week of \(displayedRow.date.formatted(.dateTime.day().month(.abbreviated)))"
         case .month:
-            return currentRow.date.formatted(.dateTime.month(.wide)).lowercased()
+            let sameYear = calendar.isDate(displayedRow.date, equalTo: .now, toGranularity: .year)
+            return sameYear
+                ? displayedRow.date.formatted(.dateTime.month(.wide)).lowercased()
+                : displayedRow.date.formatted(.dateTime.month(.wide).year()).lowercased()
         }
     }
 
@@ -244,11 +262,7 @@ struct MenuView: View {
                 x: .value("Period", point.date, unit: chartUnit),
                 y: .value("Cost", point.cost)
             )
-            .foregroundStyle(
-                point.period == hoveredPeriod
-                    ? Color.accentColor
-                    : Color.accentColor.opacity(0.32)
-            )
+            .foregroundStyle(barColor(for: point.period))
             .cornerRadius(1.5)
         }
         .chartXScale(domain: chartDomain)
@@ -296,20 +310,37 @@ struct MenuView: View {
                     .onContinuousHover { phase in
                         switch phase {
                         case .active(let location):
-                            if let date: Date = proxy.value(atX: location.x) {
-                                hoveredPeriod = points.last {
-                                    guard let interval = Calendar.current.dateInterval(of: chartUnit, for: $0.date) else { return false }
-                                    return interval.contains(date)
-                                }?.period
-                            }
+                            hoveredPeriod = period(atX: location.x, proxy: proxy, points: points)
                         case .ended:
                             hoveredPeriod = nil
                         }
+                    }
+                    .onTapGesture(coordinateSpace: .local) { location in
+                        guard let hit = period(atX: location.x, proxy: proxy, points: points) else {
+                            selectedPeriod = nil
+                            return
+                        }
+                        // Click a bar to pin it; click it again to unpin.
+                        selectedPeriod = (selectedPeriod == hit) ? nil : hit
                     }
             }
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
+    }
+
+    private func period(atX x: CGFloat, proxy: ChartProxy, points: [ChartPoint]) -> String? {
+        guard let date: Date = proxy.value(atX: x) else { return nil }
+        return points.last {
+            guard let interval = Calendar.current.dateInterval(of: chartUnit, for: $0.date) else { return false }
+            return interval.contains(date)
+        }?.period
+    }
+
+    private func barColor(for period: String) -> Color {
+        if period == selectedPeriod { return .accentColor }
+        if period == hoveredPeriod { return .accentColor.opacity(0.65) }
+        return .accentColor.opacity(selectedPeriod == nil ? 0.32 : 0.18)
     }
 
     // MARK: Period picker
@@ -324,7 +355,10 @@ struct MenuView: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 4)
-        .onChange(of: tab) { hoveredPeriod = nil }
+        .onChange(of: tab) {
+            hoveredPeriod = nil
+            selectedPeriod = nil
+        }
     }
 
     // MARK: Rows (Overview: agents ⇄ models · Agent tab: that agent's models)
@@ -368,13 +402,13 @@ struct MenuView: View {
                         tokens: $0.totalTokens, cost: $0.cost)
             }
         } else if rowsMode == .agents {
-            all = currentRow.agents.map {
+            all = displayedRow.agents.map {
                 RowItem(id: $0.id, dot: AgentPalette.color(for: $0.name),
                         name: AgentPalette.displayName($0.name),
                         tokens: $0.totalTokens, cost: $0.cost)
             }
         } else {
-            all = currentRow.models.map {
+            all = displayedRow.models.map {
                 RowItem(id: $0.id, dot: AgentPalette.modelColor(for: $0.name),
                         name: AgentPalette.modelDisplayName($0.name),
                         tokens: $0.totalTokens, cost: $0.cost)
