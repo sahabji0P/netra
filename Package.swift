@@ -8,6 +8,12 @@ let package = Package(
         .executableTarget(
             name: "Netra",
             path: "Sources/Netra"
-        )
+        ),
+        .testTarget(
+            name: "NetraTests",
+            dependencies: ["Netra"],
+            path: "Tests/NetraTests",
+            resources: [.copy("Fixtures")]
+        ),
     ]
 )

@@ -18,6 +18,9 @@ final class UsageStore {
     private let client = CCUsageClient()
     private var refreshTask: Task<Void, Never>?
     private let staleAfter: TimeInterval = 60
+    /// The Anthropic usage endpoint is unofficial — poll it gently, not every
+    /// local refresh. Quota barely moves in five minutes anyway.
+    private let claudeQuotaTTL: TimeInterval = 300
 
     private var cacheURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -36,7 +39,7 @@ final class UsageStore {
         startSafetyTimer()
     }
 
-    func refresh() async {
+    func refresh(forceQuota: Bool = false) async {
         guard refreshTask == nil else { return }
         state = .refreshing
         let task = Task {
@@ -45,7 +48,7 @@ final class UsageStore {
                 // Block and quota data are bonuses — their failure must not fail the refresh.
                 let block = try? await client.fetchActiveBlock()
                 let codexQuota = await Task.detached { CodexQuotaReader.read() }.value
-                let claudeQuota = (try? await ClaudeQuotaFetcher.fetch()) ?? snapshot?.claudeQuota
+                let claudeQuota = await refreshedClaudeQuota(force: forceQuota)
                 let fresh = UsageSnapshot(fetchedAt: .now, report: report,
                                           activeBlock: block ?? nil, codexQuota: codexQuota,
                                           claudeQuota: claudeQuota)
@@ -60,6 +63,16 @@ final class UsageStore {
         refreshTask = task
         await task.value
         refreshTask = nil
+    }
+
+    /// Within the TTL the cached quota is reused; past it we refetch, and on
+    /// failure keep the old value — its fetchedAt lets the UI label it stale.
+    private func refreshedClaudeQuota(force: Bool) async -> ClaudeQuota? {
+        if !force, let existing = snapshot?.claudeQuota,
+           Date.now.timeIntervalSince(existing.fetchedAt) < claudeQuotaTTL {
+            return existing
+        }
+        return (try? await ClaudeQuotaFetcher.fetch()) ?? snapshot?.claudeQuota
     }
 
     /// Called when the popover opens: refresh only if the data has gone stale.

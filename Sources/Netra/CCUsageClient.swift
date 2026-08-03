@@ -77,16 +77,31 @@ actor CCUsageClient {
 
         try process.run()
 
-        let watchdog = Task {
-            try await Task.sleep(for: .seconds(timeout))
-            if process.isRunning { process.terminate() }
-        }
-        defer { watchdog.cancel() }
+        // Drain both pipes concurrently off the actor: if either drain ran on
+        // this actor (or sequentially), a full pipe buffer could deadlock a
+        // hung or stderr-noisy child. FileHandle is Sendable; Process is not,
+        // so the process itself stays actor-isolated below.
+        let outHandle = stdout.fileHandleForReading
+        let errHandle = stderr.fileHandleForReading
+        let outTask = Task.detached { try outHandle.readToEnd() ?? Data() }
+        let errTask = Task.detached { try errHandle.readToEnd() ?? Data() }
 
-        // Drain stdout before waiting so a large report can't deadlock the pipe.
-        let outData = try stdout.fileHandleForReading.readToEnd() ?? Data()
-        let errData = try stderr.fileHandleForReading.readToEnd() ?? Data()
-        process.waitUntilExit()
+        // Await exit by polling with suspension points, so the timeout keeps
+        // executing even though it lives on this actor. (Awaits make the actor
+        // reentrant; callers are already serialized by UsageStore.)
+        let deadline = ContinuousClock.now + .seconds(timeout)
+        while process.isRunning {
+            if ContinuousClock.now > deadline {
+                process.terminate()
+                try? await Task.sleep(for: .milliseconds(300))
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                throw CCUsageError.timedOut
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        let outData = (try? await outTask.value) ?? Data()
+        let errData = (try? await errTask.value) ?? Data()
 
         guard process.terminationReason == .exit else { throw CCUsageError.timedOut }
         guard process.terminationStatus == 0 else {

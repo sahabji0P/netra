@@ -17,7 +17,7 @@ extension MenuView {
             case "codex":
                 codexQuotaContent
             case "opencode":
-                placeholderRow("OpenCode limits", detail: "pay-per-token · no quota window")
+                placeholderRow("OpenCode limits", detail: "no unified quota source connected")
             default:
                 placeholderRow("\(AgentPalette.displayName(selectedAgent ?? "")) limits",
                                detail: "tracked server-side · not connected yet")
@@ -34,7 +34,7 @@ extension MenuView {
         panelHideTask = nil
         if hovering {
             limitsPanelOpen = true
-        } else {
+        } else if !limitsPanelPinned {
             // Grace period so the pointer can travel from the summary row
             // into the panel without it collapsing mid-flight.
             panelHideTask = Task {
@@ -60,19 +60,35 @@ extension MenuView {
         store.snapshot?.codexQuota?.windows.map(\.usedPercent).max()
     }
 
+    /// Hover peeks at the panel; clicking pins it open (and keyboard/VoiceOver
+    /// users get the same toggle, since this is a real button).
     private var limitsSummaryRow: some View {
-        HStack(spacing: 10) {
-            Text("Limits")
-                .font(.system(size: 11, weight: .medium))
-            providerPill(agent: "claude", percent: claudeWorstPercent)
-            providerPill(agent: "codex", percent: codexWorstPercent)
-            Spacer()
-            Text(limitsPanelOpen ? "›" : "details ›")
-                .font(.system(size: 9.5))
-                .foregroundStyle(.tertiary)
+        Button {
+            limitsPanelPinned.toggle()
+            if !limitsPanelPinned { setLimitsPanel(hovering: false) }
+        } label: {
+            HStack(spacing: 10) {
+                Text("Limits")
+                    .font(.system(size: 11, weight: .medium))
+                providerPill(agent: "claude", percent: claudeWorstPercent)
+                providerPill(agent: "codex", percent: codexWorstPercent)
+                Spacer()
+                Text(limitsPanelPinned ? "✕" : (limitsPanelOpen ? "›" : "details ›"))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
         }
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
         .onHover { setLimitsPanel(hovering: $0) }
+        .accessibilityLabel(limitsAccessibilityLabel)
+        .accessibilityHint("Shows per-provider limit details")
+    }
+
+    private var limitsAccessibilityLabel: String {
+        let claude = claudeWorstPercent.map { "Claude \(Int($0.rounded())) percent used" } ?? "Claude unknown"
+        let codex = codexWorstPercent.map { "Codex \(Int($0.rounded())) percent used" } ?? "Codex unknown"
+        return "Provider limits. \(claude). \(codex)."
     }
 
     private func providerPill(agent: String, percent: Double?) -> some View {
@@ -96,7 +112,7 @@ extension MenuView {
             Divider()
             codexQuotaContent
             Divider()
-            placeholderRow("OpenCode", detail: "pay-per-token · no window")
+            placeholderRow("OpenCode", detail: "no unified quota source")
             Spacer(minLength: 0)
         }
         .padding(16)
@@ -185,11 +201,12 @@ extension MenuView {
 
     private func claudeCaption(_ quota: ClaudeQuota) -> String {
         var parts: [String] = []
-        if let plan = quota.subscriptionType {
-            parts.append("\(plan) plan · live from Anthropic")
-        } else {
-            parts.append("live from Anthropic")
-        }
+        if let plan = quota.subscriptionType { parts.append("\(plan) plan") }
+        // Say how old the number actually is; flag it once it stops being
+        // plausibly current (TTL is 5 min, so >15 min means fetches are failing).
+        let age = Format.age(since: quota.fetchedAt)
+        let isStale = Date.now.timeIntervalSince(quota.fetchedAt) > 900
+        parts.append(isStale ? "⚠ stale · Anthropic · \(age)" : "Anthropic · \(age)")
         if let block = store.snapshot?.activeBlock, block.end > .now {
             parts.append("this block \(Format.cost(block.cost)) → \(Format.cost(block.projectedCost)) proj")
         }

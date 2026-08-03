@@ -7,6 +7,9 @@ import Security
 struct ClaudeQuota: Codable, Sendable {
     var windows: [QuotaWindow]
     var subscriptionType: String?
+    /// When this quota was actually fetched from Anthropic. Carried through
+    /// fallbacks so the UI can say how old the number is instead of "live".
+    var fetchedAt: Date
 }
 
 enum ClaudeQuotaError: Error {
@@ -30,6 +33,13 @@ enum ClaudeQuotaFetcher {
         guard let http = response as? HTTPURLResponse else { throw ClaudeQuotaError.http(-1) }
         guard http.statusCode == 200 else { throw ClaudeQuotaError.http(http.statusCode) }
 
+        return try quota(fromResponse: data, subscriptionType: credentials.subscriptionType)
+    }
+
+    /// Parses the usage-endpoint response. Split out so the (unofficial,
+    /// schema-unstable) contract can be locked down with fixture tests.
+    static func quota(fromResponse data: Data, subscriptionType: String?,
+                      now: Date = .now) throws -> ClaudeQuota {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ClaudeQuotaError.decoding
         }
@@ -47,7 +57,7 @@ enum ClaudeQuotaFetcher {
         addWindow(key: "seven_day_sonnet", label: "weekly · Sonnet")
 
         guard !windows.isEmpty else { throw ClaudeQuotaError.decoding }
-        return ClaudeQuota(windows: windows, subscriptionType: credentials.subscriptionType)
+        return ClaudeQuota(windows: windows, subscriptionType: subscriptionType, fetchedAt: now)
     }
 
     private static func parseDate(_ string: String) -> Date? {
@@ -56,7 +66,7 @@ enum ClaudeQuotaFetcher {
         return fractional.date(from: string) ?? ISO8601DateFormatter().date(from: string)
     }
 
-    private struct Credentials {
+    struct Credentials {
         var accessToken: String
         var subscriptionType: String?
     }
@@ -73,6 +83,12 @@ enum ClaudeQuotaFetcher {
         guard status == errSecSuccess, let data = item as? Data else {
             throw ClaudeQuotaError.keychain(status)
         }
+        return try credentials(fromKeychainData: data)
+    }
+
+    /// Parses the Keychain payload. Split out so the credential contract can
+    /// be tested with fixtures instead of a live Keychain.
+    static func credentials(fromKeychainData data: Data, now: Date = .now) throws -> Credentials {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = object["claudeAiOauth"] as? [String: Any],
               let accessToken = oauth["accessToken"] as? String else {
@@ -80,7 +96,7 @@ enum ClaudeQuotaFetcher {
         }
         // expiresAt is epoch milliseconds; Claude Code refreshes it whenever it runs.
         if let expiresAt = oauth["expiresAt"] as? Double,
-           expiresAt / 1000 < Date.now.timeIntervalSince1970 {
+           expiresAt / 1000 < now.timeIntervalSince1970 {
             throw ClaudeQuotaError.tokenExpired
         }
         return Credentials(

@@ -19,6 +19,7 @@ struct MenuView: View {
     @State var selectedPeriod: String?   // pinned by clicking a bar
     @State private var hoveredRowID: String?
     @State var limitsPanelOpen = false
+    @State var limitsPanelPinned = false
     @State var panelHideTask: Task<Void, Never>?
 
     // MARK: Derived data
@@ -67,12 +68,12 @@ struct MenuView: View {
                 footer
             }
             .frame(width: 316)
-            if limitsPanelOpen, selectedAgent == nil {
+            if limitsPanelOpen || limitsPanelPinned, selectedAgent == nil {
                 Divider()
                 limitsPanel
             }
         }
-        .animation(.snappy(duration: 0.18), value: limitsPanelOpen)
+        .animation(.snappy(duration: 0.18), value: limitsPanelOpen || limitsPanelPinned)
         .onAppear { store.refreshIfStale() }
     }
 
@@ -439,7 +440,7 @@ struct MenuView: View {
     private var footer: some View {
         HStack {
             footerButton("arrow.clockwise", "Refresh") {
-                Task { await store.refresh() }
+                Task { await store.refresh(forceQuota: true) }
             }
             Spacer()
             footerButton("moon.fill", "Lock & Sleep") {
