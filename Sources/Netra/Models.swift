@@ -183,12 +183,14 @@ struct UsageSnapshot: Codable, Sendable {
     var monthly: [PeriodRow]
     var activeBlock: BlockStat?
     var codexQuota: CodexQuota?
+    var claudeQuota: ClaudeQuota?
 
     init(fetchedAt: Date, report: CCUnifiedReport, activeBlock: BlockStat?,
-         codexQuota: CodexQuota?, calendar: Calendar = .current) {
+         codexQuota: CodexQuota?, claudeQuota: ClaudeQuota?, calendar: Calendar = .current) {
         self.fetchedAt = fetchedAt
         self.activeBlock = activeBlock
         self.codexQuota = codexQuota
+        self.claudeQuota = claudeQuota
 
         func rows(_ source: [CCRow]?, dateFormat: String) -> [PeriodRow] {
             let formatter = DateFormatter()

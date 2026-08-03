@@ -45,8 +45,10 @@ final class UsageStore {
                 // Block and quota data are bonuses — their failure must not fail the refresh.
                 let block = try? await client.fetchActiveBlock()
                 let codexQuota = await Task.detached { CodexQuotaReader.read() }.value
+                let claudeQuota = (try? await ClaudeQuotaFetcher.fetch()) ?? snapshot?.claudeQuota
                 let fresh = UsageSnapshot(fetchedAt: .now, report: report,
-                                          activeBlock: block ?? nil, codexQuota: codexQuota)
+                                          activeBlock: block ?? nil, codexQuota: codexQuota,
+                                          claudeQuota: claudeQuota)
                 snapshot = fresh
                 state = .fresh
                 persist(fresh)

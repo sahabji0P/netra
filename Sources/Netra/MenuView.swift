@@ -562,7 +562,29 @@ struct MenuView: View {
 
     @ViewBuilder
     private var claudeBlockContent: some View {
-        if let block = store.snapshot?.activeBlock, block.end > .now {
+        if let quota = store.snapshot?.claudeQuota, !quota.windows.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(quota.windows, id: \.self) { window in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(AgentPalette.color(for: "claude"))
+                            .frame(width: 6, height: 6)
+                        Text("Claude · \(window.label) limit")
+                            .font(.system(size: 11, weight: .medium))
+                        Spacer()
+                        if let resets = window.resetsAt {
+                            Text("resets \(resetText(resets))")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    meter(percent: window.usedPercent, status: "ok")
+                }
+                Text(claudeCaption(quota))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            }
+        } else if let block = store.snapshot?.activeBlock, block.end > .now {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Circle()
@@ -614,6 +636,19 @@ struct MenuView: View {
         } else {
             placeholderRow("Codex limits", detail: "no session data yet — run Codex once", dotAgent: "codex")
         }
+    }
+
+    private func claudeCaption(_ quota: ClaudeQuota) -> String {
+        var parts: [String] = []
+        if let plan = quota.subscriptionType {
+            parts.append("\(plan) plan · live from Anthropic")
+        } else {
+            parts.append("live from Anthropic")
+        }
+        if let block = store.snapshot?.activeBlock, block.end > .now {
+            parts.append("this block \(Format.cost(block.cost)) → \(Format.cost(block.projectedCost)) proj")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func codexCaption(_ quota: CodexQuota) -> String {
