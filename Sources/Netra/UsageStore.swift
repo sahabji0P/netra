@@ -21,6 +21,7 @@ final class UsageStore {
     /// The Anthropic usage endpoint is unofficial — poll it gently, not every
     /// local refresh. Quota barely moves in five minutes anyway.
     private let claudeQuotaTTL: TimeInterval = 300
+    private var lastClaudeQuotaAttempt: Date?
 
     private var cacheURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -67,12 +68,21 @@ final class UsageStore {
 
     /// Within the TTL the cached quota is reused; past it we refetch, and on
     /// failure keep the old value — its fetchedAt lets the UI label it stale.
+    /// Failed attempts also respect the TTL (a 429 must not be retried every
+    /// minute just because the cached value is old or missing).
     private func refreshedClaudeQuota(force: Bool) async -> ClaudeQuota? {
-        if !force, let existing = snapshot?.claudeQuota,
-           Date.now.timeIntervalSince(existing.fetchedAt) < claudeQuotaTTL {
-            return existing
+        let existing = snapshot?.claudeQuota
+        if !force {
+            if let existing, Date.now.timeIntervalSince(existing.fetchedAt) < claudeQuotaTTL {
+                return existing
+            }
+            if let attempt = lastClaudeQuotaAttempt,
+               Date.now.timeIntervalSince(attempt) < claudeQuotaTTL {
+                return existing
+            }
         }
-        return (try? await ClaudeQuotaFetcher.fetch()) ?? snapshot?.claudeQuota
+        lastClaudeQuotaAttempt = .now
+        return (try? await ClaudeQuotaFetcher.fetch()) ?? existing
     }
 
     /// Called when the popover opens: refresh only if the data has gone stale.
