@@ -44,8 +44,7 @@ enum CodexQuotaReader {
                 let minutes = window["window_minutes"] as? Int
                 let resets = (window["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
                 windows.append(QuotaWindow(
-                    label: label(forMinutes: minutes),
-                    usedPercent: used, resetsAt: resets, windowMinutes: minutes
+                    label: label(forMinutes: minutes), usedPercent: used, resetsAt: resets
                 ))
             }
             guard !windows.isEmpty else { continue }

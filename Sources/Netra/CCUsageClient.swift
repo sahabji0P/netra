@@ -21,14 +21,14 @@ actor CCUsageClient {
     private let timeout: TimeInterval = 20
     private var cachedBinary: URL?
 
-    func fetchReport(sinceDaysBack: Int = 190) async throws -> CCUnifiedReport {
+    func fetchReport() async throws -> CCUnifiedReport {
         let data = try await runJSON([
             "daily",
             "--sections", "daily,weekly,monthly",
             "--by-agent",
             "--json",
             "--offline",
-            "--since", sinceArgument(daysBack: sinceDaysBack),
+            "--since", sinceArgument(daysBack: 190),
         ])
         do {
             return try JSONDecoder().decode(CCUnifiedReport.self, from: data)

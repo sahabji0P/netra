@@ -7,7 +7,6 @@ import Security
 struct ClaudeQuota: Codable, Sendable {
     var windows: [QuotaWindow]
     var subscriptionType: String?
-    var fetchedAt: Date
 }
 
 enum ClaudeQuotaError: Error {
@@ -40,9 +39,7 @@ enum ClaudeQuotaFetcher {
             guard let window = object[key] as? [String: Any],
                   let utilization = window["utilization"] as? Double else { return }
             let resets = (window["resets_at"] as? String).flatMap(parseDate)
-            windows.append(QuotaWindow(
-                label: label, usedPercent: utilization, resetsAt: resets, windowMinutes: nil
-            ))
+            windows.append(QuotaWindow(label: label, usedPercent: utilization, resetsAt: resets))
         }
         addWindow(key: "five_hour", label: "5h")
         addWindow(key: "seven_day", label: "weekly")
@@ -50,11 +47,7 @@ enum ClaudeQuotaFetcher {
         addWindow(key: "seven_day_sonnet", label: "weekly · Sonnet")
 
         guard !windows.isEmpty else { throw ClaudeQuotaError.decoding }
-        return ClaudeQuota(
-            windows: windows,
-            subscriptionType: credentials.subscriptionType,
-            fetchedAt: .now
-        )
+        return ClaudeQuota(windows: windows, subscriptionType: credentials.subscriptionType)
     }
 
     private static func parseDate(_ string: String) -> Date? {

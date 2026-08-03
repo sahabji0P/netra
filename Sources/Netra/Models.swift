@@ -54,7 +54,6 @@ struct CCBlock: Decodable {
     var totalTokens: Int
     var costUSD: Double
     var projection: CCBlockProjection?
-    var burnRate: CCBlockBurnRate?
     var tokenLimitStatus: CCTokenLimitStatus?
 }
 
@@ -62,11 +61,6 @@ struct CCBlockProjection: Decodable {
     var remainingMinutes: Int
     var totalCost: Double
     var totalTokens: Int
-}
-
-struct CCBlockBurnRate: Decodable {
-    var costPerHour: Double
-    var tokensPerMinute: Double
 }
 
 struct CCTokenLimitStatus: Decodable {
@@ -113,7 +107,6 @@ struct PeriodRow: Codable, Hashable, Identifiable, Sendable {
     var inputTokens: Int
     var outputTokens: Int
     var cacheReadTokens: Int
-    var cacheCreationTokens: Int
     var totalTokens: Int
     var agents: [AgentStat]
     var models: [ModelStat]
@@ -121,7 +114,7 @@ struct PeriodRow: Codable, Hashable, Identifiable, Sendable {
 
     static func zero(period: String = "", date: Date = .now) -> PeriodRow {
         PeriodRow(period: period, date: date, cost: 0, inputTokens: 0, outputTokens: 0,
-                  cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0, agents: [], models: [])
+                  cacheReadTokens: 0, totalTokens: 0, agents: [], models: [])
     }
 
     func agentStat(_ name: String) -> AgentStat? {
@@ -134,7 +127,6 @@ struct QuotaWindow: Codable, Hashable, Sendable {
     var label: String
     var usedPercent: Double
     var resetsAt: Date?
-    var windowMinutes: Int?
 }
 
 /// Real server-side limits as last reported to the Codex CLI. Read from local
@@ -152,9 +144,7 @@ struct BlockStat: Codable, Sendable {
     var end: Date
     var tokens: Int
     var cost: Double
-    var costPerHour: Double
     var projectedCost: Double
-    var limitTokens: Int
     var percentUsed: Double
     var limitStatus: String
 
@@ -168,9 +158,7 @@ struct BlockStat: Codable, Sendable {
         self.end = end
         tokens = block.totalTokens
         cost = block.costUSD
-        costPerHour = block.burnRate?.costPerHour ?? 0
         projectedCost = block.projection?.totalCost ?? block.costUSD
-        limitTokens = block.tokenLimitStatus?.limit ?? 0
         percentUsed = block.tokenLimitStatus?.percentUsed ?? 0
         limitStatus = block.tokenLimitStatus?.status ?? "ok"
     }
@@ -211,7 +199,7 @@ struct UsageSnapshot: Codable, Sendable {
                 return PeriodRow(
                     period: row.period, date: date, cost: row.totalCost,
                     inputTokens: row.inputTokens, outputTokens: row.outputTokens,
-                    cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
+                    cacheReadTokens: row.cacheReadTokens,
                     totalTokens: row.totalTokens, agents: agents,
                     models: modelStats(row.modelBreakdowns)
                 )
