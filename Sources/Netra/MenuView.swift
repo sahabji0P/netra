@@ -15,6 +15,7 @@ struct MenuView: View {
     @State private var rowsMode: RowsMode = .agents
     @State private var hoveredPeriod: String?
     @State private var selectedPeriod: String?   // pinned by clicking a bar
+    @State private var hoveredRowID: String?
 
     // MARK: Derived data
 
@@ -36,7 +37,8 @@ struct MenuView: View {
     private var agentStat: AgentStat? {
         guard let selectedAgent else { return nil }
         return displayedRow.agentStat(selectedAgent)
-            ?? AgentStat(name: selectedAgent, cost: 0, totalTokens: 0, models: [])
+            ?? AgentStat(name: selectedAgent, cost: 0, totalTokens: 0,
+                         inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, models: [])
     }
 
     private var agentNames: [String] {
@@ -127,9 +129,20 @@ struct MenuView: View {
 
     // MARK: Totals
 
+    private var hoveredRow: RowItem? {
+        guard let hoveredRowID else { return nil }
+        return rowItems.shown.first { $0.id == hoveredRowID }
+    }
+
     private var displayedCost: Double {
+        if let hoveredRow { return hoveredRow.cost }
         if let hovered = hoveredChartPoint { return hovered.cost }
         return agentStat?.cost ?? displayedRow.cost
+    }
+
+    /// Denominator for the "% of period" shown when hovering a row.
+    private var shareBasis: Double {
+        agentStat?.cost ?? displayedRow.cost
     }
 
     private var totals: some View {
@@ -139,9 +152,25 @@ struct MenuView: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
                 .animation(.snappy, value: displayedCost)
-            Text(captionLine)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(captionLine)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if showBackToCurrent {
+                    Button {
+                        selectedPeriod = nil
+                    } label: {
+                        Text(backToCurrentTitle)
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
             Text(tokensLine)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
@@ -151,8 +180,24 @@ struct MenuView: View {
         .padding(.top, 10)
     }
 
+    private var showBackToCurrent: Bool {
+        guard let selectedPeriod else { return false }
+        return selectedPeriod != currentRow.period
+    }
+
+    private var backToCurrentTitle: String {
+        switch tab {
+        case .today: "← today"
+        case .week: "← this week"
+        case .month: "← this month"
+        }
+    }
+
     private var captionLine: String {
         let scope = selectedAgent.map { AgentPalette.displayName($0) + " · " } ?? ""
+        if let hoveredRow {
+            return scope + "\(hoveredRow.name) · \(periodCaption)"
+        }
         if let hovered = hoveredChartPoint {
             return scope + "est. API cost · \(hovered.label)"
         }
@@ -161,11 +206,18 @@ struct MenuView: View {
     }
 
     private var tokensLine: String {
+        if let hoveredRow {
+            var line = "\(Format.tokens(hoveredRow.input)) in · \(Format.tokens(hoveredRow.output)) out · \(Format.tokens(hoveredRow.cacheRead)) cached"
+            if shareBasis > 0 {
+                line += " · \(Int((hoveredRow.cost / shareBasis * 100).rounded()))% of period"
+            }
+            return line
+        }
         if let hovered = hoveredChartPoint {
             return "\(Format.tokens(hovered.tokens)) tokens in this period"
         }
         if let agentStat {
-            return "\(Format.tokens(agentStat.totalTokens)) tokens"
+            return "\(Format.tokens(agentStat.inputTokens)) in · \(Format.tokens(agentStat.outputTokens)) out · \(Format.tokens(agentStat.cacheReadTokens)) cached"
         }
         return "\(Format.tokens(displayedRow.inputTokens)) in · \(Format.tokens(displayedRow.outputTokens)) out · \(Format.tokens(displayedRow.cacheReadTokens)) cached"
     }
@@ -388,6 +440,9 @@ struct MenuView: View {
         var name: String
         var tokens: Int
         var cost: Double
+        var input: Int
+        var output: Int
+        var cacheRead: Int
     }
 
     /// At most this many rows; the rest collapse into one "+N more" line.
@@ -399,19 +454,22 @@ struct MenuView: View {
             all = agentStat.models.map {
                 RowItem(id: $0.id, dot: AgentPalette.modelColor(for: $0.name),
                         name: AgentPalette.modelDisplayName($0.name),
-                        tokens: $0.totalTokens, cost: $0.cost)
+                        tokens: $0.totalTokens, cost: $0.cost,
+                        input: $0.inputTokens, output: $0.outputTokens, cacheRead: $0.cacheReadTokens)
             }
         } else if rowsMode == .agents {
             all = displayedRow.agents.map {
                 RowItem(id: $0.id, dot: AgentPalette.color(for: $0.name),
                         name: AgentPalette.displayName($0.name),
-                        tokens: $0.totalTokens, cost: $0.cost)
+                        tokens: $0.totalTokens, cost: $0.cost,
+                        input: $0.inputTokens, output: $0.outputTokens, cacheRead: $0.cacheReadTokens)
             }
         } else {
             all = displayedRow.models.map {
                 RowItem(id: $0.id, dot: AgentPalette.modelColor(for: $0.name),
                         name: AgentPalette.modelDisplayName($0.name),
-                        tokens: $0.totalTokens, cost: $0.cost)
+                        tokens: $0.totalTokens, cost: $0.cost,
+                        input: $0.inputTokens, output: $0.outputTokens, cacheRead: $0.cacheReadTokens)
             }
         }
         let shown = Array(all.prefix(Self.maxRows))
@@ -438,8 +496,17 @@ struct MenuView: View {
                         .font(.system(size: 12, weight: .medium))
                         .monospacedDigit()
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 10)
                 .padding(.vertical, 7)
+                .contentShape(Rectangle())
+                .background(
+                    hoveredRowID == item.id ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+                .padding(.horizontal, 6)
+                .onHover { inside in
+                    hoveredRowID = inside ? item.id : (hoveredRowID == item.id ? nil : hoveredRowID)
+                }
             }
             if items.moreCount > 0 {
                 HStack {

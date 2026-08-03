@@ -43,7 +43,7 @@ struct CCModelBreakdown: Decodable {
 // MARK: - Domain model (what the UI consumes; persisted as the last-success cache)
 
 enum PeriodTab: String, CaseIterable, Sendable {
-    case today = "Today"
+    case today = "Day"
     case week = "Week"
     case month = "Month"
 }
@@ -52,6 +52,9 @@ struct ModelStat: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var cost: Double
     var totalTokens: Int
+    var inputTokens: Int
+    var outputTokens: Int
+    var cacheReadTokens: Int
     var id: String { name }
 }
 
@@ -59,6 +62,9 @@ struct AgentStat: Codable, Hashable, Identifiable, Sendable {
     var name: String
     var cost: Double
     var totalTokens: Int
+    var inputTokens: Int
+    var outputTokens: Int
+    var cacheReadTokens: Int
     var models: [ModelStat]
     var id: String { name }
 }
@@ -106,6 +112,8 @@ struct UsageSnapshot: Codable, Sendable {
                     .map { agent in
                         AgentStat(
                             name: agent.agent, cost: agent.totalCost, totalTokens: agent.totalTokens,
+                            inputTokens: agent.inputTokens, outputTokens: agent.outputTokens,
+                            cacheReadTokens: agent.cacheReadTokens,
                             models: modelStats(agent.modelBreakdowns)
                         )
                     }
@@ -126,7 +134,9 @@ struct UsageSnapshot: Codable, Sendable {
                     ModelStat(
                         name: $0.modelName, cost: $0.cost,
                         totalTokens: $0.inputTokens + $0.outputTokens
-                            + $0.cacheCreationTokens + $0.cacheReadTokens
+                            + $0.cacheCreationTokens + $0.cacheReadTokens,
+                        inputTokens: $0.inputTokens, outputTokens: $0.outputTokens,
+                        cacheReadTokens: $0.cacheReadTokens
                     )
                 }
                 .sorted { $0.cost > $1.cost }
