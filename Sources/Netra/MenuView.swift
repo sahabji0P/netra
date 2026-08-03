@@ -537,11 +537,30 @@ struct MenuView: View {
 
     // MARK: Current 5h block (local estimate from ccusage blocks)
 
+    /// Block data comes from Claude Code logs only — each provider has its own
+    /// separate limit system, so this strip never pretends to cover the others.
+    private var showsClaudeBlock: Bool {
+        selectedAgent == nil || selectedAgent == "claude"
+    }
+
     private var blockSection: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if let block = store.snapshot?.activeBlock, block.end > .now {
+            if !showsClaudeBlock {
                 HStack {
-                    Text("Current 5h block")
+                    Text("\(AgentPalette.displayName(selectedAgent ?? "")) limits")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("tracked server-side · not connected yet")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            } else if let block = store.snapshot?.activeBlock, block.end > .now {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(AgentPalette.color(for: "claude"))
+                        .frame(width: 6, height: 6)
+                    Text("Claude · current 5h block")
                         .font(.system(size: 11, weight: .medium))
                     Spacer()
                     TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -563,8 +582,11 @@ struct MenuView: View {
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
             } else {
-                HStack {
-                    Text("Current 5h block")
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(AgentPalette.color(for: "claude").opacity(0.5))
+                        .frame(width: 6, height: 6)
+                    Text("Claude · 5h block")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                     Spacer()
