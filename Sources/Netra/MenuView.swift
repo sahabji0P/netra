@@ -37,12 +37,17 @@ struct MenuView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text("Netra")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
             Spacer()
-            TimelineView(.periodic(from: .now, by: 30)) { _ in
-                Text(headerStatus)
+            if store.state == .refreshing {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.6)
+            }
+            TimelineView(.periodic(from: .now, by: 10)) { context in
+                Text(headerStatus(now: context.date))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
@@ -51,14 +56,14 @@ struct MenuView: View {
         .padding(.top, 14)
     }
 
-    private var headerStatus: String {
+    private func headerStatus(now: Date) -> String {
         switch store.state {
         case .refreshing: return "refreshing…"
         case .failed(let message): return message
         case .empty: return "no data yet"
         case .fresh, .stale:
             guard let at = store.snapshot?.fetchedAt else { return "" }
-            let age = Format.age(since: at)
+            let age = Format.age(since: at, now: now)
             return store.state == .stale ? "stale · \(age)" : "updated \(age)"
         }
     }
@@ -70,7 +75,7 @@ struct MenuView: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
                 .animation(.snappy, value: stat.cost)
-            Text("est. API-equivalent cost · \(tab.rawValue.lowercased())")
+            Text("est. API-equivalent cost · \(periodCaption)")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Text("\(Format.tokens(stat.inputTokens)) in · \(Format.tokens(stat.outputTokens)) out · \(Format.tokens(stat.cacheReadTokens)) cached")
@@ -80,6 +85,23 @@ struct MenuView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
+    }
+
+    /// "today" / "week of 3 Aug" / "August" — says exactly what window the number covers.
+    private var periodCaption: String {
+        let formatter = DateFormatter()
+        switch tab {
+        case .today:
+            return "today"
+        case .week:
+            formatter.dateFormat = "yyyy-MM-dd"
+            guard let start = formatter.date(from: stat.period) else { return "this week" }
+            return "week of \(start.formatted(.dateTime.day().month(.abbreviated)))"
+        case .month:
+            formatter.dateFormat = "yyyy-MM"
+            guard let start = formatter.date(from: stat.period) else { return "this month" }
+            return start.formatted(.dateTime.month(.wide)).lowercased()
+        }
     }
 
     private var picker: some View {
