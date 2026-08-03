@@ -17,7 +17,7 @@ final class UsageStore {
 
     private let client = CCUsageClient()
     private var refreshTask: Task<Void, Never>?
-    private let staleAfter: TimeInterval = 300
+    private let staleAfter: TimeInterval = 60
 
     private var cacheURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -42,7 +42,9 @@ final class UsageStore {
         let task = Task {
             do {
                 let report = try await client.fetchReport()
-                let fresh = UsageSnapshot(fetchedAt: .now, report: report)
+                // Block data is a bonus — its failure must not fail the refresh.
+                let block = try? await client.fetchActiveBlock()
+                let fresh = UsageSnapshot(fetchedAt: .now, report: report, activeBlock: block ?? nil)
                 snapshot = fresh
                 state = .fresh
                 persist(fresh)
@@ -70,7 +72,7 @@ final class UsageStore {
     private func startSafetyTimer() {
         Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))
+                try? await Task.sleep(for: .seconds(60))
                 await self?.refresh()
             }
         }

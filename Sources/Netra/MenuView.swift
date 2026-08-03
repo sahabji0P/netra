@@ -55,6 +55,8 @@ struct MenuView: View {
             if selectedAgent == nil { rowsToggle }
             rows
             Divider().padding(.horizontal, 16)
+            blockSection
+            Divider().padding(.horizontal, 16)
             awakeSection
             Divider().padding(.horizontal, 16)
             footer
@@ -531,6 +533,60 @@ struct MenuView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: Current 5h block (local estimate from ccusage blocks)
+
+    private var blockSection: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let block = store.snapshot?.activeBlock, block.end > .now {
+                HStack {
+                    Text("Current 5h block")
+                        .font(.system(size: 11, weight: .medium))
+                    Spacer()
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text("ends in \(remaining(until: block.end, now: context.date))")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(.quaternary)
+                        Capsule()
+                            .fill(blockColor(block))
+                            .frame(width: geo.size.width * min(block.percentUsed / 100, 1))
+                    }
+                }
+                .frame(height: 4)
+                Text("\(Format.cost(block.cost)) · \(Format.tokens(block.tokens)) tok · \(Int(block.percentUsed.rounded()))% of usual peak · → \(Format.cost(block.projectedCost)) projected")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            } else {
+                HStack {
+                    Text("Current 5h block")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("idle — no active block")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private func blockColor(_ block: BlockStat) -> Color {
+        if block.limitStatus == "exceeds" || block.percentUsed >= 95 { return Color(red: 0.80, green: 0.35, blue: 0.32) }
+        if block.limitStatus == "warning" || block.percentUsed >= 75 { return Color(red: 0.83, green: 0.55, blue: 0.25) }
+        return .accentColor
+    }
+
+    private func remaining(until end: Date, now: Date) -> String {
+        let minutes = max(0, Int(end.timeIntervalSince(now) / 60))
+        return minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m"
     }
 
     // MARK: Awake

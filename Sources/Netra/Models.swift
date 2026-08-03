@@ -40,6 +40,42 @@ struct CCModelBreakdown: Decodable {
     var cacheReadTokens: Int
 }
 
+// DTOs for `ccusage blocks` (5-hour billing windows)
+
+struct CCBlocksReport: Decodable {
+    var blocks: [CCBlock]?
+}
+
+struct CCBlock: Decodable {
+    var startTime: String
+    var endTime: String
+    var isActive: Bool?
+    var isGap: Bool?
+    var totalTokens: Int
+    var costUSD: Double
+    var projection: CCBlockProjection?
+    var burnRate: CCBlockBurnRate?
+    var tokenLimitStatus: CCTokenLimitStatus?
+}
+
+struct CCBlockProjection: Decodable {
+    var remainingMinutes: Int
+    var totalCost: Double
+    var totalTokens: Int
+}
+
+struct CCBlockBurnRate: Decodable {
+    var costPerHour: Double
+    var tokensPerMinute: Double
+}
+
+struct CCTokenLimitStatus: Decodable {
+    var limit: Int
+    var percentUsed: Double
+    var projectedUsage: Int
+    var status: String
+}
+
 // MARK: - Domain model (what the UI consumes; persisted as the last-success cache)
 
 enum PeriodTab: String, CaseIterable, Sendable {
@@ -93,14 +129,47 @@ struct PeriodRow: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// The active 5-hour billing block, estimated locally by ccusage from agent
+/// logs. "Limit" is the user's own historical peak block, not a provider quota.
+struct BlockStat: Codable, Sendable {
+    var start: Date
+    var end: Date
+    var tokens: Int
+    var cost: Double
+    var costPerHour: Double
+    var projectedCost: Double
+    var limitTokens: Int
+    var percentUsed: Double
+    var limitStatus: String
+
+    init?(block: CCBlock?) {
+        guard let block, block.isActive == true, block.isGap != true else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let start = iso.date(from: block.startTime),
+              let end = iso.date(from: block.endTime) else { return nil }
+        self.start = start
+        self.end = end
+        tokens = block.totalTokens
+        cost = block.costUSD
+        costPerHour = block.burnRate?.costPerHour ?? 0
+        projectedCost = block.projection?.totalCost ?? block.costUSD
+        limitTokens = block.tokenLimitStatus?.limit ?? 0
+        percentUsed = block.tokenLimitStatus?.percentUsed ?? 0
+        limitStatus = block.tokenLimitStatus?.status ?? "ok"
+    }
+}
+
 struct UsageSnapshot: Codable, Sendable {
     var fetchedAt: Date
     var daily: [PeriodRow]
     var weekly: [PeriodRow]
     var monthly: [PeriodRow]
+    var activeBlock: BlockStat?
 
-    init(fetchedAt: Date, report: CCUnifiedReport, calendar: Calendar = .current) {
+    init(fetchedAt: Date, report: CCUnifiedReport, activeBlock: BlockStat?, calendar: Calendar = .current) {
         self.fetchedAt = fetchedAt
+        self.activeBlock = activeBlock
 
         func rows(_ source: [CCRow]?, dateFormat: String) -> [PeriodRow] {
             let formatter = DateFormatter()

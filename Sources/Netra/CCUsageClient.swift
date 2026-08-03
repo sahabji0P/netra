@@ -22,22 +22,52 @@ actor CCUsageClient {
     private var cachedBinary: URL?
 
     func fetchReport(sinceDaysBack: Int = 190) async throws -> CCUnifiedReport {
-        let binary = try resolveBinary()
-
-        let since = Calendar.current.date(byAdding: .day, value: -sinceDaysBack, to: .now) ?? .now
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-
-        let process = Process()
-        process.executableURL = binary
-        process.arguments = [
+        let data = try await runJSON([
             "daily",
             "--sections", "daily,weekly,monthly",
             "--by-agent",
             "--json",
             "--offline",
-            "--since", formatter.string(from: since),
-        ]
+            "--since", sinceArgument(daysBack: sinceDaysBack),
+        ])
+        do {
+            return try JSONDecoder().decode(CCUnifiedReport.self, from: data)
+        } catch {
+            throw CCUsageError.decoding("\(error)")
+        }
+    }
+
+    /// The active 5-hour billing block; 60 days of history give the
+    /// "usual peak" that --token-limit max measures against.
+    func fetchActiveBlock() async throws -> BlockStat? {
+        let data = try await runJSON([
+            "blocks",
+            "--json",
+            "--offline",
+            "--token-limit", "max",
+            "--since", sinceArgument(daysBack: 60),
+        ])
+        do {
+            let report = try JSONDecoder().decode(CCBlocksReport.self, from: data)
+            return BlockStat(block: report.blocks?.first { $0.isActive == true })
+        } catch {
+            throw CCUsageError.decoding("\(error)")
+        }
+    }
+
+    private func sinceArgument(daysBack: Int) -> String {
+        let since = Calendar.current.date(byAdding: .day, value: -daysBack, to: .now) ?? .now
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: since)
+    }
+
+    private func runJSON(_ arguments: [String]) async throws -> Data {
+        let binary = try resolveBinary()
+
+        let process = Process()
+        process.executableURL = binary
+        process.arguments = arguments
 
         let stdout = Pipe()
         let stderr = Pipe()
@@ -66,11 +96,7 @@ actor CCUsageClient {
             )
         }
 
-        do {
-            return try JSONDecoder().decode(CCUnifiedReport.self, from: outData)
-        } catch {
-            throw CCUsageError.decoding("\(error)")
-        }
+        return outData
     }
 
     private func resolveBinary() throws -> URL {
