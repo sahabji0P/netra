@@ -129,6 +129,22 @@ struct PeriodRow: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// One provider-reported quota window (e.g. Codex 5h / weekly / monthly).
+struct QuotaWindow: Codable, Hashable, Sendable {
+    var label: String
+    var usedPercent: Double
+    var resetsAt: Date?
+    var windowMinutes: Int?
+}
+
+/// Real server-side limits as last reported to the Codex CLI. Read from local
+/// session rollouts — freshness depends on when Codex last talked to OpenAI.
+struct CodexQuota: Codable, Sendable {
+    var windows: [QuotaWindow]
+    var planType: String?
+    var observedAt: Date?
+}
+
 /// The active 5-hour billing block, estimated locally by ccusage from agent
 /// logs. "Limit" is the user's own historical peak block, not a provider quota.
 struct BlockStat: Codable, Sendable {
@@ -166,10 +182,13 @@ struct UsageSnapshot: Codable, Sendable {
     var weekly: [PeriodRow]
     var monthly: [PeriodRow]
     var activeBlock: BlockStat?
+    var codexQuota: CodexQuota?
 
-    init(fetchedAt: Date, report: CCUnifiedReport, activeBlock: BlockStat?, calendar: Calendar = .current) {
+    init(fetchedAt: Date, report: CCUnifiedReport, activeBlock: BlockStat?,
+         codexQuota: CodexQuota?, calendar: Calendar = .current) {
         self.fetchedAt = fetchedAt
         self.activeBlock = activeBlock
+        self.codexQuota = codexQuota
 
         func rows(_ source: [CCRow]?, dateFormat: String) -> [PeriodRow] {
             let formatter = DateFormatter()

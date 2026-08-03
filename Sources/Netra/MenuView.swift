@@ -537,25 +537,33 @@ struct MenuView: View {
 
     // MARK: Current 5h block (local estimate from ccusage blocks)
 
-    /// Block data comes from Claude Code logs only — each provider has its own
-    /// separate limit system, so this strip never pretends to cover the others.
-    private var showsClaudeBlock: Bool {
-        selectedAgent == nil || selectedAgent == "claude"
+    /// Each provider has its own limit system: Claude gets the local 5h-block
+    /// estimate, Codex gets the server-reported quota from its session logs.
+    private var blockSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            switch selectedAgent {
+            case nil:
+                claudeBlockContent
+                codexQuotaContent
+            case "claude":
+                claudeBlockContent
+            case "codex":
+                codexQuotaContent
+            case "opencode":
+                placeholderRow("OpenCode limits", detail: "pay-per-token · no quota window")
+            default:
+                placeholderRow("\(AgentPalette.displayName(selectedAgent ?? "")) limits",
+                               detail: "tracked server-side · not connected yet")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
-    private var blockSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if !showsClaudeBlock {
-                HStack {
-                    Text("\(AgentPalette.displayName(selectedAgent ?? "")) limits")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("tracked server-side · not connected yet")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
-            } else if let block = store.snapshot?.activeBlock, block.end > .now {
+    @ViewBuilder
+    private var claudeBlockContent: some View {
+        if let block = store.snapshot?.activeBlock, block.end > .now {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(AgentPalette.color(for: "claude"))
@@ -569,41 +577,95 @@ struct MenuView: View {
                             .foregroundStyle(.tertiary)
                     }
                 }
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(.quaternary)
-                        Capsule()
-                            .fill(blockColor(block))
-                            .frame(width: geo.size.width * min(block.percentUsed / 100, 1))
-                    }
-                }
-                .frame(height: 4)
+                meter(percent: block.percentUsed, status: block.limitStatus)
                 Text("\(Format.cost(block.cost)) · \(Format.tokens(block.tokens)) tok · \(Int(block.percentUsed.rounded()))% of usual peak · → \(Format.cost(block.projectedCost)) projected")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
-            } else {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(AgentPalette.color(for: "claude").opacity(0.5))
-                        .frame(width: 6, height: 6)
-                    Text("Claude · 5h block")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("idle — no active block")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                }
             }
+        } else {
+            placeholderRow("Claude · 5h block", detail: "idle — no active block", dotAgent: "claude")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 
-    private func blockColor(_ block: BlockStat) -> Color {
-        if block.limitStatus == "exceeds" || block.percentUsed >= 95 { return Color(red: 0.80, green: 0.35, blue: 0.32) }
-        if block.limitStatus == "warning" || block.percentUsed >= 75 { return Color(red: 0.83, green: 0.55, blue: 0.25) }
+    @ViewBuilder
+    private var codexQuotaContent: some View {
+        if let quota = store.snapshot?.codexQuota, !quota.windows.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(quota.windows, id: \.self) { window in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(AgentPalette.color(for: "codex"))
+                            .frame(width: 6, height: 6)
+                        Text("Codex · \(window.label) limit")
+                            .font(.system(size: 11, weight: .medium))
+                        Spacer()
+                        if let resets = window.resetsAt {
+                            Text("resets \(resetText(resets))")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    meter(percent: window.usedPercent, status: "ok")
+                }
+                Text(codexCaption(quota))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+            }
+        } else {
+            placeholderRow("Codex limits", detail: "no session data yet — run Codex once", dotAgent: "codex")
+        }
+    }
+
+    private func codexCaption(_ quota: CodexQuota) -> String {
+        var parts: [String] = ["\(Int(quota.windows[0].usedPercent.rounded()))% used"]
+        if let plan = quota.planType { parts.append("\(plan) plan") }
+        if let observed = quota.observedAt {
+            parts.append("reported by Codex \(Format.age(since: observed))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func placeholderRow(_ title: String, detail: String, dotAgent: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            if let dotAgent {
+                Circle()
+                    .fill(AgentPalette.color(for: dotAgent).opacity(0.5))
+                    .frame(width: 6, height: 6)
+            }
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(detail)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private func meter(percent: Double, status: String) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                Capsule()
+                    .fill(meterColor(percent: percent, status: status))
+                    .frame(width: geo.size.width * min(percent / 100, 1))
+            }
+        }
+        .frame(height: 4)
+    }
+
+    private func meterColor(percent: Double, status: String) -> Color {
+        if status == "exceeds" || percent >= 95 { return Color(red: 0.80, green: 0.35, blue: 0.32) }
+        if status == "warning" || percent >= 75 { return Color(red: 0.83, green: 0.55, blue: 0.25) }
         return .accentColor
+    }
+
+    private func resetText(_ date: Date) -> String {
+        let hours = date.timeIntervalSinceNow / 3600
+        if hours < 24 {
+            return "at \(date.formatted(date: .omitted, time: .shortened))"
+        }
+        return "in \(Int((hours / 24).rounded()))d"
     }
 
     private func remaining(until end: Date, now: Date) -> String {
