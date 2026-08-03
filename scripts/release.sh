@@ -24,7 +24,7 @@ if [[ -n "$NETRA_NOTARY_PROFILE" ]]; then
   rm dist/notarize-tmp.zip
 else
   echo "⚠ Skipping notarization (NETRA_NOTARY_PROFILE not set)."
-  echo "  Friends must install with: brew install --cask --no-quarantine ..."
+  echo "  Friends must clear quarantine: xattr -dr com.apple.quarantine /Applications/Netra.app"
 fi
 
 ditto -c -k --keepParent dist/Netra.app "$ZIP"

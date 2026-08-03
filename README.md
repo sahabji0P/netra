@@ -7,7 +7,9 @@ cost, plus agent-aware keep-awake. Vision doc: `../netra-product-vision.html`.
 
 ```sh
 brew tap sahabji0P/tap
-brew install --cask --no-quarantine netra   # --no-quarantine until notarized
+brew trust sahabji0P/tap                  # Homebrew 6+ asks once per third-party tap
+brew install --cask netra
+xattr -dr com.apple.quarantine /Applications/Netra.app   # until notarized
 ```
 
 Update later with `brew upgrade netra`. The app shows a quiet notice in its
