@@ -2,12 +2,6 @@ import AppKit
 import Charts
 import SwiftUI
 
-enum PeriodTab: String, CaseIterable {
-    case today = "Today"
-    case week = "Week"
-    case month = "Month"
-}
-
 enum RowsMode: String, CaseIterable {
     case agents
     case models
@@ -17,34 +11,46 @@ struct MenuView: View {
     @Bindable var store: UsageStore
     @Bindable var awake: AwakeController
     @State private var tab: PeriodTab = .today
+    @State private var selectedAgent: String?   // nil = Overview
     @State private var rowsMode: RowsMode = .agents
-    @State private var hoveredDay: Date?
+    @State private var hoveredPeriod: String?
 
-    private var stat: PeriodStat {
-        guard let snapshot = store.snapshot else { return .zero }
-        switch tab {
-        case .today: return snapshot.today
-        case .week: return snapshot.week
-        case .month: return snapshot.month
-        }
+    // MARK: Derived data
+
+    private var currentRow: PeriodRow {
+        store.snapshot?.currentRow(for: tab) ?? .zero()
+    }
+
+    /// (cost, tokens, models) for the current tab, filtered to the selected agent.
+    private var agentStat: AgentStat? {
+        guard let selectedAgent else { return nil }
+        return currentRow.agentStat(selectedAgent)
+            ?? AgentStat(name: selectedAgent, cost: 0, totalTokens: 0, models: [])
+    }
+
+    private var agentNames: [String] {
+        store.snapshot?.agentNames ?? []
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            tabStrip
             totals
-            history
+            chart
             picker
-            rowsToggle
+            if selectedAgent == nil { rowsToggle }
             rows
             Divider().padding(.horizontal, 16)
             awakeSection
             Divider().padding(.horizontal, 16)
             footer
         }
-        .frame(width: 300)
+        .frame(width: 316)
         .onAppear { store.refreshIfStale() }
     }
+
+    // MARK: Header
 
     private var header: some View {
         HStack(spacing: 6) {
@@ -78,21 +84,52 @@ struct MenuView: View {
         }
     }
 
+    // MARK: Agent tabs
+
+    private var tabStrip: some View {
+        HStack(spacing: 4) {
+            tabChip("Overview", isSelected: selectedAgent == nil) { selectedAgent = nil }
+            ForEach(agentNames, id: \.self) { name in
+                tabChip(AgentPalette.shortName(name), isSelected: selectedAgent == name) {
+                    selectedAgent = name
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+    }
+
+    private func tabChip(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10.5, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(isSelected ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Totals
+
+    private var displayedCost: Double {
+        if let hovered = hoveredChartPoint { return hovered.cost }
+        return agentStat?.cost ?? currentRow.cost
+    }
+
     private var totals: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(Format.cost(hoveredPoint?.cost ?? stat.cost))
+            Text(Format.cost(displayedCost))
                 .font(.system(size: 34, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .animation(.snappy, value: hoveredPoint?.cost ?? stat.cost)
-            Text(hoveredPoint == nil
-                ? "est. API-equivalent cost · \(periodCaption)"
-                : "est. API-equivalent cost · \(hoveredPoint!.date.formatted(.dateTime.day().month(.abbreviated)))")
+                .animation(.snappy, value: displayedCost)
+            Text(captionLine)
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            Text(hoveredPoint == nil
-                ? "\(Format.tokens(stat.inputTokens)) in · \(Format.tokens(stat.outputTokens)) out · \(Format.tokens(stat.cacheReadTokens)) cached"
-                : "\(Format.tokens(hoveredPoint!.totalTokens)) tokens that day")
+            Text(tokensLine)
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 1)
@@ -101,36 +138,156 @@ struct MenuView: View {
         .padding(.top, 10)
     }
 
-    // MARK: History chart (last 30 days, hover for a day's numbers)
+    private var captionLine: String {
+        let scope = selectedAgent.map { AgentPalette.displayName($0) + " · " } ?? ""
+        if let hovered = hoveredChartPoint {
+            return scope + "est. API cost · \(hovered.label)"
+        }
+        return scope + "est. API-equivalent cost · \(periodCaption)"
+    }
 
-    private var hoveredPoint: DayPoint? {
-        guard let hoveredDay else { return nil }
-        return store.snapshot?.history.first {
-            Calendar.current.isDate($0.date, inSameDayAs: hoveredDay)
+    private var tokensLine: String {
+        if let hovered = hoveredChartPoint {
+            return "\(Format.tokens(hovered.tokens)) tokens in this period"
+        }
+        if let agentStat {
+            return "\(Format.tokens(agentStat.totalTokens)) tokens"
+        }
+        return "\(Format.tokens(currentRow.inputTokens)) in · \(Format.tokens(currentRow.outputTokens)) out · \(Format.tokens(currentRow.cacheReadTokens)) cached"
+    }
+
+    private var periodCaption: String {
+        let calendar = Calendar.current
+        switch tab {
+        case .today:
+            return "today"
+        case .week:
+            let week = calendar.component(.weekOfYear, from: currentRow.date)
+            return "W\(week) · week of \(currentRow.date.formatted(.dateTime.day().month(.abbreviated)))"
+        case .month:
+            return currentRow.date.formatted(.dateTime.month(.wide)).lowercased()
         }
     }
 
-    private var history: some View {
-        let points = store.snapshot?.history ?? []
-        let end = Calendar.current.startOfDay(for: .now)
-        let start = Calendar.current.date(byAdding: .day, value: -29, to: end) ?? end
+    // MARK: Chart (granularity follows the period picker)
 
-        return Chart(points.filter { $0.date >= start }) { point in
+    private struct ChartPoint: Identifiable {
+        var period: String
+        var date: Date
+        var cost: Double
+        var tokens: Int
+        var label: String
+        var id: String { period }
+    }
+
+    private var chartPoints: [ChartPoint] {
+        guard let snapshot = store.snapshot else { return [] }
+        let calendar = Calendar.current
+        return snapshot.rows(for: tab).compactMap { row in
+            guard row.date >= chartDomain.lowerBound else { return nil }
+            let cost: Double
+            let tokens: Int
+            if let selectedAgent {
+                let agent = row.agentStat(selectedAgent)
+                cost = agent?.cost ?? 0
+                tokens = agent?.totalTokens ?? 0
+            } else {
+                cost = row.cost
+                tokens = row.totalTokens
+            }
+            let label: String
+            switch tab {
+            case .today:
+                label = row.date.formatted(.dateTime.day().month(.abbreviated))
+            case .week:
+                label = "W\(calendar.component(.weekOfYear, from: row.date)) · wk of \(row.date.formatted(.dateTime.day().month(.abbreviated)))"
+            case .month:
+                label = row.date.formatted(.dateTime.month(.wide).year())
+            }
+            return ChartPoint(period: row.period, date: row.date, cost: cost, tokens: tokens, label: label)
+        }
+    }
+
+    private var chartUnit: Calendar.Component {
+        switch tab {
+        case .today: .day
+        case .week: .weekOfYear
+        case .month: .month
+        }
+    }
+
+    private var chartDomain: ClosedRange<Date> {
+        let calendar = Calendar.current
+        let now = Date.now
+        switch tab {
+        case .today:
+            let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
+            return calendar.date(byAdding: .day, value: -30, to: end)! ... end
+        case .week:
+            let thisWeek = calendar.dateInterval(of: .weekOfYear, for: now)!
+            return calendar.date(byAdding: .weekOfYear, value: -11, to: thisWeek.start)! ... thisWeek.end
+        case .month:
+            let thisMonth = calendar.dateInterval(of: .month, for: now)!
+            return calendar.date(byAdding: .month, value: -5, to: thisMonth.start)! ... thisMonth.end
+        }
+    }
+
+    private var hoveredChartPoint: ChartPoint? {
+        guard let hoveredPeriod else { return nil }
+        return chartPoints.first { $0.period == hoveredPeriod }
+    }
+
+    private var chart: some View {
+        let points = chartPoints
+        return Chart(points) { point in
             BarMark(
-                x: .value("Day", point.date, unit: .day),
+                x: .value("Period", point.date, unit: chartUnit),
                 y: .value("Cost", point.cost)
             )
             .foregroundStyle(
-                hoveredDay.map { Calendar.current.isDate($0, inSameDayAs: point.date) } ?? false
+                point.period == hoveredPeriod
                     ? Color.accentColor
                     : Color.accentColor.opacity(0.32)
             )
             .cornerRadius(1.5)
         }
-        .chartXScale(domain: start...Calendar.current.date(byAdding: .day, value: 1, to: end)!)
-        .chartXAxis(.hidden)
+        .chartXScale(domain: chartDomain)
         .chartYAxis(.hidden)
-        .frame(height: 40)
+        .chartXAxis {
+            switch tab {
+            case .today:
+                AxisMarks(values: .stride(by: .day, count: 7)) { value in
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(date.formatted(.dateTime.day().month(.abbreviated)))
+                                .font(.system(size: 8))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            case .week:
+                AxisMarks(values: .stride(by: .weekOfYear, count: 2)) { value in
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text("W\(Calendar.current.component(.weekOfYear, from: date))")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            case .month:
+                AxisMarks(values: .stride(by: .month, count: 1)) { value in
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(date.formatted(.dateTime.month(.abbreviated)))
+                                .font(.system(size: 8))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(height: 46)
         .chartOverlay { proxy in
             GeometryReader { _ in
                 Rectangle()
@@ -140,10 +297,13 @@ struct MenuView: View {
                         switch phase {
                         case .active(let location):
                             if let date: Date = proxy.value(atX: location.x) {
-                                hoveredDay = Calendar.current.startOfDay(for: date)
+                                hoveredPeriod = points.last {
+                                    guard let interval = Calendar.current.dateInterval(of: chartUnit, for: $0.date) else { return false }
+                                    return interval.contains(date)
+                                }?.period
                             }
                         case .ended:
-                            hoveredDay = nil
+                            hoveredPeriod = nil
                         }
                     }
             }
@@ -152,22 +312,7 @@ struct MenuView: View {
         .padding(.top, 10)
     }
 
-    /// "today" / "week of 3 Aug" / "August" — says exactly what window the number covers.
-    private var periodCaption: String {
-        let formatter = DateFormatter()
-        switch tab {
-        case .today:
-            return "today"
-        case .week:
-            formatter.dateFormat = "yyyy-MM-dd"
-            guard let start = formatter.date(from: stat.period) else { return "this week" }
-            return "week of \(start.formatted(.dateTime.day().month(.abbreviated)))"
-        case .month:
-            formatter.dateFormat = "yyyy-MM"
-            guard let start = formatter.date(from: stat.period) else { return "this month" }
-            return start.formatted(.dateTime.month(.wide)).lowercased()
-        }
-    }
+    // MARK: Period picker
 
     private var picker: some View {
         Picker("", selection: $tab) {
@@ -179,7 +324,10 @@ struct MenuView: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 4)
+        .onChange(of: tab) { hoveredPeriod = nil }
     }
+
+    // MARK: Rows (Overview: agents ⇄ models · Agent tab: that agent's models)
 
     private var rowsToggle: some View {
         HStack(spacing: 8) {
@@ -196,7 +344,7 @@ struct MenuView: View {
             Spacer()
         }
         .padding(.horizontal, 16)
-        .padding(.top, 10)
+        .padding(.top, 8)
         .padding(.bottom, 2)
     }
 
@@ -213,15 +361,20 @@ struct MenuView: View {
 
     private var rowItems: (shown: [RowItem], moreCount: Int, moreCost: Double) {
         let all: [RowItem]
-        switch rowsMode {
-        case .agents:
-            all = stat.agents.map {
+        if let agentStat {
+            all = agentStat.models.map {
+                RowItem(id: $0.id, dot: AgentPalette.modelColor(for: $0.name),
+                        name: AgentPalette.modelDisplayName($0.name),
+                        tokens: $0.totalTokens, cost: $0.cost)
+            }
+        } else if rowsMode == .agents {
+            all = currentRow.agents.map {
                 RowItem(id: $0.id, dot: AgentPalette.color(for: $0.name),
                         name: AgentPalette.displayName($0.name),
                         tokens: $0.totalTokens, cost: $0.cost)
             }
-        case .models:
-            all = stat.models.map {
+        } else {
+            all = currentRow.models.map {
                 RowItem(id: $0.id, dot: AgentPalette.modelColor(for: $0.name),
                         name: AgentPalette.modelDisplayName($0.name),
                         tokens: $0.totalTokens, cost: $0.cost)
@@ -279,6 +432,8 @@ struct MenuView: View {
         .padding(.vertical, 4)
     }
 
+    // MARK: Awake
+
     private var awakeSection: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
@@ -321,6 +476,8 @@ struct MenuView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: Footer
+
     private var footer: some View {
         HStack {
             footerButton("arrow.clockwise", "Refresh") {
@@ -349,6 +506,8 @@ struct MenuView: View {
     }
 }
 
+// MARK: - Palette
+
 enum AgentPalette {
     static func color(for agent: String) -> Color {
         switch agent.lowercased() {
@@ -366,6 +525,13 @@ enum AgentPalette {
         case "codex": "Codex"
         case "opencode": "OpenCode"
         default: agent.prefix(1).uppercased() + agent.dropFirst()
+        }
+    }
+
+    static func shortName(_ agent: String) -> String {
+        switch agent.lowercased() {
+        case "claude": "Claude"
+        default: displayName(agent)
         }
     }
 

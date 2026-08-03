@@ -19,7 +19,7 @@ struct NetraApp: App {
             MenuView(store: store, awake: awake)
         } label: {
             Image(systemName: awake.isAwake ? "eye.fill" : "eye")
-            if let cost = store.snapshot?.today.cost, cost > 0 {
+            if let cost = store.snapshot?.currentRow(for: .today).cost, cost > 0 {
                 Text(Format.cost(cost))
             }
         }

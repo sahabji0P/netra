@@ -21,7 +21,7 @@ actor CCUsageClient {
     private let timeout: TimeInterval = 20
     private var cachedBinary: URL?
 
-    func fetchReport(sinceDaysBack: Int = 35) async throws -> CCUnifiedReport {
+    func fetchReport(sinceDaysBack: Int = 190) async throws -> CCUnifiedReport {
         let binary = try resolveBinary()
 
         let since = Calendar.current.date(byAdding: .day, value: -sinceDaysBack, to: .now) ?? .now
