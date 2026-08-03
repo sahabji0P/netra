@@ -5,120 +5,21 @@ import SwiftUI
 extension MenuView {
     /// Each provider has its own limit system: Claude gets the local 5h-block
     /// estimate, Codex gets the server-reported quota from its session logs.
-    /// On the All tab this collapses to one summary line; hovering it opens
-    /// the side panel with the full per-provider breakdown.
-    var blockSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            switch selectedAgent {
-            case nil:
-                limitsSummaryRow
-            case "claude":
-                claudeBlockContent
-            case "codex":
-                codexQuotaContent
-            case "opencode":
-                placeholderRow("OpenCode limits", detail: "no unified quota source connected")
-            default:
-                placeholderRow("\(AgentPalette.displayName(selectedAgent ?? "")) limits",
-                               detail: "tracked server-side · not connected yet")
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: Limits summary (All tab) + hover side panel
-
-    func setLimitsPanel(hovering: Bool) {
-        panelHideTask?.cancel()
-        panelHideTask = nil
-        if hovering {
-            limitsPanelOpen = true
-        } else if !limitsPanelPinned {
-            // Grace period so the pointer can travel from the summary row
-            // into the panel without it collapsing mid-flight.
-            panelHideTask = Task {
-                try? await Task.sleep(for: .milliseconds(300))
-                guard !Task.isCancelled else { return }
-                limitsPanelOpen = false
-            }
-        }
-    }
-
-    private var claudeWorstPercent: Double? {
-        if let quota = store.snapshot?.claudeQuota,
-           let worst = quota.windows.map(\.usedPercent).max() {
-            return worst
-        }
-        if let block = store.snapshot?.activeBlock, block.end > .now {
-            return block.percentUsed
-        }
-        return nil
-    }
-
-    private var codexWorstPercent: Double? {
-        store.snapshot?.codexQuota?.windows.map(\.usedPercent).max()
-    }
-
-    /// Hover peeks at the panel; clicking pins it open (and keyboard/VoiceOver
-    /// users get the same toggle, since this is a real button).
-    private var limitsSummaryRow: some View {
-        Button {
-            limitsPanelPinned.toggle()
-            if !limitsPanelPinned { setLimitsPanel(hovering: false) }
-        } label: {
-            HStack(spacing: 10) {
-                Text("Limits")
-                    .font(.system(size: 11, weight: .medium))
-                providerPill(agent: "claude", percent: claudeWorstPercent)
-                providerPill(agent: "codex", percent: codexWorstPercent)
-                Spacer()
-                Text(limitsPanelPinned ? "✕" : (limitsPanelOpen ? "›" : "details ›"))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { setLimitsPanel(hovering: $0) }
-        .accessibilityLabel(limitsAccessibilityLabel)
-        .accessibilityHint("Shows per-provider limit details")
-    }
-
-    private var limitsAccessibilityLabel: String {
-        let claude = claudeWorstPercent.map { "Claude \(Int($0.rounded())) percent used" } ?? "Claude unknown"
-        let codex = codexWorstPercent.map { "Codex \(Int($0.rounded())) percent used" } ?? "Codex unknown"
-        return "Provider limits. \(claude). \(codex)."
-    }
-
-    private func providerPill(agent: String, percent: Double?) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(AgentPalette.color(for: agent).opacity(percent == nil ? 0.4 : 1))
-                .frame(width: 6, height: 6)
-            Text(percent.map { "\(Int($0.rounded()))%" } ?? "–")
-                .font(.system(size: 10, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(percent.map { meterColor(percent: $0, status: "ok") } ?? .secondary)
-        }
-    }
-
-    var limitsPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Provider limits")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
+    /// Shown inline under an agent row on hover, or below the chart when that
+    /// agent's tab is selected — limits have no section of their own.
+    @ViewBuilder
+    func limitsContent(for agent: String) -> some View {
+        switch agent {
+        case "claude":
             claudeBlockContent
-            Divider()
+        case "codex":
             codexQuotaContent
-            Divider()
-            placeholderRow("OpenCode", detail: "no unified quota source")
-            Spacer(minLength: 0)
+        case "opencode":
+            placeholderRow("OpenCode limits", detail: "no unified quota source connected")
+        default:
+            placeholderRow("\(AgentPalette.displayName(agent)) limits",
+                           detail: "tracked server-side · not connected yet")
         }
-        .padding(16)
-        .frame(width: 248, alignment: .topLeading)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .onHover { setLimitsPanel(hovering: $0) }
     }
 
     @ViewBuilder

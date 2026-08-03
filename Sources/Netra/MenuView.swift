@@ -20,9 +20,6 @@ struct MenuView: View {
     @State var hoveredPeriod: String?
     @State var selectedPeriod: String?   // pinned by clicking a bar
     @State private var hoveredRowID: String?
-    @State var limitsPanelOpen = false
-    @State var limitsPanelPinned = false
-    @State var panelHideTask: Task<Void, Never>?
 
     // MARK: Derived data
 
@@ -53,29 +50,26 @@ struct MenuView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                tabStrip
-                totals
-                chart
-                picker
-                if selectedAgent == nil { rowsToggle }
-                rows
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            tabStrip
+            totals
+            picker
+            if selectedAgent == nil { rowsToggle }
+            rows
+            chart
+            if let selectedAgent {
                 Divider().padding(.horizontal, 16)
-                blockSection
-                Divider().padding(.horizontal, 16)
-                awakeSection
-                Divider().padding(.horizontal, 16)
-                footer
+                limitsContent(for: selectedAgent)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
             }
-            .frame(width: 316)
-            if limitsPanelOpen || limitsPanelPinned, selectedAgent == nil {
-                Divider()
-                limitsPanel
-            }
+            Divider().padding(.horizontal, 16)
+            awakeSection
+            Divider().padding(.horizontal, 16)
+            footer
         }
-        .animation(.snappy(duration: 0.18), value: limitsPanelOpen || limitsPanelPinned)
+        .frame(width: 316)
         .onAppear { store.refreshIfStale() }
     }
 
@@ -340,33 +334,48 @@ struct MenuView: View {
         return (shown, rest.count, rest.reduce(0) { $0 + $1.cost })
     }
 
+    /// Agent rows expand their provider limits on hover, so limits live with
+    /// the agent instead of in a section of their own.
+    private var rowsShowAgentLimits: Bool {
+        selectedAgent == nil && rowsMode == .agents
+    }
+
     private var rows: some View {
         let items = rowItems
         return VStack(spacing: 0) {
             ForEach(items.shown) { item in
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(item.dot)
-                        .frame(width: 6, height: 6)
-                    Text(item.name)
-                        .font(.system(size: 12))
-                        .lineLimit(1)
-                    Spacer()
-                    Text(Format.tokens(item.tokens))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                    Text(Format.cost(item.cost))
-                        .font(.system(size: 12, weight: .medium))
-                        .monospacedDigit()
+                VStack(spacing: 0) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(item.dot)
+                            .frame(width: 6, height: 6)
+                        Text(item.name)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(Format.tokens(item.tokens))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tertiary)
+                        Text(Format.cost(item.cost))
+                            .font(.system(size: 12, weight: .medium))
+                            .monospacedDigit()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(
+                        hoveredRowID == item.id ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear),
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    if rowsShowAgentLimits, hoveredRowID == item.id {
+                        limitsContent(for: item.id)
+                            .padding(.horizontal, 10)
+                            .padding(.top, 5)
+                            .padding(.bottom, 7)
+                            .transition(.opacity)
+                    }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
-                .background(
-                    hoveredRowID == item.id ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear),
-                    in: RoundedRectangle(cornerRadius: 6)
-                )
                 .padding(.horizontal, 6)
+                .contentShape(Rectangle())
                 .onHover { inside in
                     hoveredRowID = inside ? item.id : (hoveredRowID == item.id ? nil : hoveredRowID)
                 }
@@ -394,6 +403,7 @@ struct MenuView: View {
             }
         }
         .padding(.vertical, 4)
+        .animation(.snappy(duration: 0.15), value: hoveredRowID)
     }
 
     // MARK: Awake

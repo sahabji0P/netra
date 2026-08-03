@@ -141,7 +141,8 @@ extension MenuView {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 10)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
 
     private func period(atX x: CGFloat, proxy: ChartProxy, points: [ChartPoint]) -> String? {
