@@ -395,15 +395,53 @@ struct MenuView: View {
                 .padding(.vertical, 5)
             }
             if items.shown.isEmpty {
-                Text(store.state == .refreshing ? "Scanning agent logs…" : "No usage in this period")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+                emptyRowsState
             }
         }
         .padding(.vertical, 4)
         .animation(.snappy(duration: 0.15), value: hoveredRowID)
+    }
+
+    /// Empty state carries the actual failure so a broken install explains
+    /// itself instead of looking like a quiet week.
+    @ViewBuilder
+    private var emptyRowsState: some View {
+        VStack(spacing: 4) {
+            if case .failed(let message) = store.state {
+                Text("Couldn't read agent usage")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                Button("Retry") {
+                    Task { await store.refresh() }
+                }
+                .controlSize(.small)
+                .padding(.top, 2)
+            } else if store.state == .refreshing {
+                Text("Scanning agent logs…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else if store.snapshot == nil || store.snapshot?.agentNames.isEmpty != false {
+                Text("No agent logs found")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("Netra reads local Claude Code / Codex / OpenCode\nsession logs — run an agent once, then Refresh")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            } else {
+                Text("No usage in this period")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
     }
 
     // MARK: Awake

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum CCUsageError: LocalizedError {
     case binaryNotFound
@@ -20,6 +21,7 @@ enum CCUsageError: LocalizedError {
 actor CCUsageClient {
     private let timeout: TimeInterval = 20
     private var cachedBinary: URL?
+    private let log = Logger(subsystem: "in.airaai.netra", category: "ccusage")
 
     func fetchReport() async throws -> CCUnifiedReport {
         let data = try await runJSON([
@@ -75,7 +77,12 @@ actor CCUsageClient {
         process.standardError = stderr
         process.standardInput = FileHandle.nullDevice
 
-        try process.run()
+        do {
+            try process.run()
+        } catch {
+            log.error("failed to spawn \(binary.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
 
         // Drain both pipes concurrently off the actor: if either drain ran on
         // this actor (or sequentially), a full pipe buffer could deadlock a
@@ -103,12 +110,14 @@ actor CCUsageClient {
         let outData = (try? await outTask.value) ?? Data()
         let errData = (try? await errTask.value) ?? Data()
 
-        guard process.terminationReason == .exit else { throw CCUsageError.timedOut }
+        guard process.terminationReason == .exit else {
+            log.error("ccusage killed by signal (args: \(arguments.joined(separator: " "), privacy: .public))")
+            throw CCUsageError.timedOut
+        }
         guard process.terminationStatus == 0 else {
-            throw CCUsageError.exitCode(
-                process.terminationStatus,
-                String(data: errData, encoding: .utf8) ?? ""
-            )
+            let stderrText = String(data: errData, encoding: .utf8) ?? ""
+            log.error("ccusage exited \(process.terminationStatus): \(stderrText.prefix(500), privacy: .public)")
+            throw CCUsageError.exitCode(process.terminationStatus, stderrText)
         }
 
         return outData
@@ -145,8 +154,15 @@ actor CCUsageClient {
         candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/ccusage"))
 
         guard let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else {
+            log.error("ccusage binary not found; searched \(candidates.map(\.path).joined(separator: ", "), privacy: .public)")
             throw CCUsageError.binaryNotFound
         }
+        // Users who bypass Gatekeeper via right-click → Open (instead of the
+        // `xattr -dr` from the install caveat) approve only the app bundle;
+        // the nested binary stays quarantined and macOS then refuses to spawn
+        // it. Since the app itself is already approved and running, clearing
+        // the child's flag ourselves is safe.
+        removexattr(found.path, "com.apple.quarantine", 0)
         cachedBinary = found
         return found
     }
