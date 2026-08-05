@@ -21,7 +21,7 @@ enum CCUsageError: LocalizedError {
 actor CCUsageClient {
     private let timeout: TimeInterval = 20
     private var cachedBinary: URL?
-    private let log = Logger(subsystem: "in.airaai.netra", category: "ccusage")
+    private let log = Logger(subsystem: "com.shashwatjain.netra", category: "ccusage")
 
     func fetchReport() async throws -> CCUnifiedReport {
         let data = try await runJSON([

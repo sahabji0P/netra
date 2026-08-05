@@ -44,7 +44,7 @@ The app shows a quiet notice in its footer when a newer release exists.
 - **App runs but no stats** → the menu's empty state says why (since v0.1.2).
   From a terminal:
   `/Applications/Netra.app/Contents/Resources/ccusage-bin daily --json --offline | head -c 300`
-  and `log show --last 10m --predicate 'subsystem == "in.airaai.netra"' --info`
+  and `log show --last 10m --predicate 'subsystem == "com.shashwatjain.netra"' --info`
 
 ## Develop
 

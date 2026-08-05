@@ -24,7 +24,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>Netra</string>
     <key>CFBundleDisplayName</key><string>Netra</string>
-    <key>CFBundleIdentifier</key><string>in.airaai.netra</string>
+    <key>CFBundleIdentifier</key><string>com.shashwatjain.netra</string>
     <key>CFBundleExecutable</key><string>Netra</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>

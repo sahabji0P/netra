@@ -10,7 +10,7 @@ import os
 /// fetch that model's pricing from LiteLLM once and persist it into a generated
 /// ccusage config (`defaults.pricingOverrides`) passed via --config.
 enum PricingOverrides {
-    private static let log = Logger(subsystem: "in.airaai.netra", category: "pricing")
+    private static let log = Logger(subsystem: "com.shashwatjain.netra", category: "pricing")
     private static let litellmURL = URL(
         string: "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json")!
     /// Retry window for models LiteLLM doesn't know yet (brand-new releases).
