@@ -334,7 +334,7 @@ struct MenuView: View {
         return (shown, rest.count, rest.reduce(0) { $0 + $1.cost })
     }
 
-    /// Agent rows expand their provider limits on hover, so limits live with
+    /// Agent rows carry their provider limits inline, so limits live with
     /// the agent instead of in a section of their own.
     private var rowsShowAgentLimits: Bool {
         selectedAgent == nil && rowsMode == .agents
@@ -366,12 +366,11 @@ struct MenuView: View {
                         hoveredRowID == item.id ? AnyShapeStyle(.quaternary.opacity(0.5)) : AnyShapeStyle(.clear),
                         in: RoundedRectangle(cornerRadius: 6)
                     )
-                    if rowsShowAgentLimits, hoveredRowID == item.id {
+                    if rowsShowAgentLimits {
                         limitsContent(for: item.id)
                             .padding(.horizontal, 10)
-                            .padding(.top, 5)
-                            .padding(.bottom, 7)
-                            .transition(.opacity)
+                            .padding(.top, 4)
+                            .padding(.bottom, 8)
                     }
                 }
                 .padding(.horizontal, 6)

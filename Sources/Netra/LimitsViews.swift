@@ -5,8 +5,8 @@ import SwiftUI
 extension MenuView {
     /// Each provider has its own limit system: Claude gets the local 5h-block
     /// estimate, Codex gets the server-reported quota from its session logs.
-    /// Shown inline under an agent row on hover, or below the chart when that
-    /// agent's tab is selected — limits have no section of their own.
+    /// Shown inline under each agent row on the overview, or below the chart
+    /// when that agent's tab is selected — limits have no section of their own.
     @ViewBuilder
     func limitsContent(for agent: String) -> some View {
         switch agent {
