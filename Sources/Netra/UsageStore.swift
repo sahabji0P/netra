@@ -45,7 +45,13 @@ final class UsageStore {
         state = .refreshing
         let task = Task {
             do {
-                let report = try await client.fetchReport()
+                var report = try await client.fetchReport()
+                // Models absent from ccusage's offline pricing table come back
+                // costed $0; pull their real pricing once and rescan.
+                let unpriced = PricingOverrides.unpricedModels(in: report)
+                if !unpriced.isEmpty, await PricingOverrides.ensure(for: unpriced) {
+                    report = try await client.fetchReport()
+                }
                 // Block and quota data are bonuses — their failure must not fail the refresh.
                 let block = try? await client.fetchActiveBlock()
                 let codexQuota = await Task.detached { CodexQuotaReader.read() }.value

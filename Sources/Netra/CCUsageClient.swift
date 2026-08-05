@@ -69,7 +69,7 @@ actor CCUsageClient {
 
         let process = Process()
         process.executableURL = binary
-        process.arguments = arguments
+        process.arguments = arguments + PricingOverrides.arguments
 
         let stdout = Pipe()
         let stderr = Pipe()
