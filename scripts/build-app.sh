@@ -1,10 +1,10 @@
 #!/bin/zsh
 # Assembles dist/Netra.app from the SwiftPM release build.
-# Usage: scripts/build-app.sh [version]   (default 0.0.0-dev)
+# Usage: scripts/build-app.sh [version]   (default: repository VERSION)
 set -e
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-0.0.0-dev}"
+VERSION="${1:-$(tr -d '[:space:]' < VERSION)}"
 APP="dist/Netra.app"
 
 swift build -c release

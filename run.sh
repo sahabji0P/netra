@@ -1,16 +1,24 @@
 #!/bin/zsh
-# Build and (re)start Netra in the menu bar.
+# Build and (re)start a development app bundle in the menu bar.
 set -e
 cd "$(dirname "$0")"
-swift build
-# Stable signing identity so the Keychain "Always Allow" for the Claude
-# credentials survives rebuilds (ad-hoc signatures change every build).
-# Override with NETRA_SIGN_ID; falls back to the first available identity,
-# then to ad-hoc so the script still works on machines without a certificate.
-IDENTITY="${NETRA_SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
-  | awk -F'"' '/Developer ID Application|Apple Development/{print $2; exit}')}"
-codesign --force --sign "${IDENTITY:--}" .build/debug/Netra
-pkill -f '.build/debug/Netra' 2>/dev/null || true
+
+VERSION="$(tr -d '[:space:]' < VERSION)"
+APP="$PWD/dist/Netra.app"
+
+scripts/build-app.sh "$VERSION"
+
+# Only one Netra menu extra should own the status item. This also replaces an
+# older /Applications installation that would otherwise remain visible while
+# the newly-built executable exits or launches invisibly behind it.
+pkill -x Netra 2>/dev/null || true
 sleep 0.5
-nohup .build/debug/Netra > /tmp/netra-dev.log 2>&1 &
-echo "Netra is running — look for the eye in your menu bar. Stop it with: pkill -f Netra"
+open -n "$APP"
+sleep 1
+
+if ! pgrep -f "$APP/Contents/MacOS/Netra" >/dev/null; then
+  echo "Netra failed to stay running from $APP" >&2
+  exit 1
+fi
+
+echo "Netra $VERSION is running from $APP — look for the eye in your menu bar."

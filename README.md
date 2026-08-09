@@ -86,6 +86,7 @@ quarantine with the `xattr` command above.
   - `AwakeController.swift` — IOKit sleep assertion (manual/timed), lock & sleep
   - `MenuView.swift` — the popover UI
 - `ccusage-bin` — pinned ccusage 20.0.19 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
+- `VERSION` — next app-bundle version used by local builds (publishing remains explicit)
 - `fixtures/` — captured real JSON output + benchmark notes
 
 ## Status
