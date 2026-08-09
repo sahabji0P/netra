@@ -22,7 +22,18 @@ appears, click **Cancel**, never "Move to Trash".
 
 Look for the eye icon in your menu bar. Netra reads your local agent session
 logs (`~/.claude`, `~/.codex`, …), so stats appear once you've run an agent at
-least once on this machine.
+least once on this machine. Click the usage summary or **Open Usage** for the
+full dashboard; **Settings** opens in that same window.
+
+The dashboard shows provider activity, equivalent API cost, token composition,
+model/day breakdowns, and available limits. Codex limits are provider-reported
+from local rollout data. Claude's active five-hour block is a local estimate,
+clearly labelled as such; Netra does not read Claude Code's Keychain item.
+
+Settings controls the menu-bar label, which sections appear in the popover,
+and optional daily-token or usage-indicator alerts. macOS notification
+permission is requested only after an alert is enabled. Equivalent API cost is
+an estimate, not subscription spend.
 
 ## Upgrade
 
@@ -70,6 +81,8 @@ quarantine with the `xattr` command above.
 - `Sources/Netra/` — the app (SwiftUI `MenuBarExtra`, window-style popover)
   - `CCUsageClient.swift` — actor that runs the pinned native ccusage binary
   - `UsageStore.swift` — snapshot state machine (empty/refreshing/fresh/stale/failed) + last-success cache
+  - `Dashboard*.swift` — full Usage and Settings window
+  - `AppPreferences.swift` / `UsageAlerts.swift` — persisted display choices and threshold notifications
   - `AwakeController.swift` — IOKit sleep assertion (manual/timed), lock & sleep
   - `MenuView.swift` — the popover UI
 - `ccusage-bin` — pinned ccusage 20.0.19 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
