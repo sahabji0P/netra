@@ -179,16 +179,28 @@ struct MenuView: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .vertical) {
+        ScrollView(.vertical) {
             menuContent
-            ScrollView(.vertical) {
-                menuContent
-            }
-            .scrollIndicators(.visible)
         }
-        .frame(width: 340)
-        .frame(maxHeight: maximumPopoverHeight)
+        .scrollIndicators(.visible)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: 340, height: preferredPopoverHeight)
         .onAppear { store.refreshIfStale() }
+    }
+
+    private var preferredPopoverHeight: CGFloat {
+        var height: CGFloat = 330
+        if !hasUsageData {
+            height += 70
+        } else {
+            if preferences.showsLimits && hasVisibleLimits { height += 115 }
+            if preferences.showsActivityChart { height += 95 }
+            if preferences.showsProviderBreakdown {
+                height += 42 + CGFloat(min(providerSummaries.count, 4)) * 35
+            }
+        }
+        if preferences.showsKeepAwake { height += 68 }
+        return min(max(height, 360), maximumPopoverHeight)
     }
 
     private var maximumPopoverHeight: CGFloat {

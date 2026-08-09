@@ -37,13 +37,19 @@ final class UsageStore {
 
     private let client = CCUsageClient()
     private let preferences: AppPreferences
-    private let alerts = UsageAlertController()
+    private let alerts: UsageAlertController
     private let cache = UsageSnapshotCache()
     private var refreshTask: Task<Void, Never>?
     private let staleAfter: TimeInterval = 60
 
-    init(preferences: AppPreferences = AppPreferences()) {
+    init(
+        preferences: AppPreferences = AppPreferences(),
+        alerts: UsageAlertController? = nil,
+        startsAutomatically: Bool = true
+    ) {
         self.preferences = preferences
+        self.alerts = alerts ?? UsageAlertController()
+        guard startsAutomatically else { return }
         Task { [weak self] in
             guard let self else { return }
             if let cached = await cache.load(), snapshot == nil {
