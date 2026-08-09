@@ -48,6 +48,58 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(snapshot.agentNames.contains("claude"))
     }
 
+    func testCacheCreationTokensMapThroughEveryNormalizedLevel() throws {
+        let model = CCModelBreakdown(
+            modelName: "claude-test", cost: 1.25, inputTokens: 10, outputTokens: 20,
+            cacheCreationTokens: 30, cacheReadTokens: 40
+        )
+        let agent = CCAgentRow(
+            agent: "claude", inputTokens: 10, outputTokens: 20,
+            cacheCreationTokens: 30, cacheReadTokens: 40, totalTokens: 100,
+            totalCost: 1.25, modelBreakdowns: [model]
+        )
+        let report = CCUnifiedReport(
+            daily: [CCRow(
+                period: "2026-08-09", inputTokens: 10, outputTokens: 20,
+                cacheCreationTokens: 30, cacheReadTokens: 40, totalTokens: 100,
+                totalCost: 1.25, agents: [agent], modelBreakdowns: [model]
+            )],
+            weekly: [], monthly: []
+        )
+
+        let snapshot = UsageSnapshot(
+            fetchedAt: .now, report: report,
+            activeBlock: nil, codexQuota: nil, claudeQuota: nil
+        )
+        let row = try XCTUnwrap(snapshot.daily.first)
+
+        XCTAssertEqual(row.cacheCreationTokens, 30)
+        XCTAssertEqual(row.agents.first?.cacheCreationTokens, 30)
+        XCTAssertEqual(row.agents.first?.models.first?.cacheCreationTokens, 30)
+        XCTAssertEqual(row.models.first?.cacheCreationTokens, 30)
+    }
+
+    func testOldCachedPeriodRowWithoutCacheCreationTokensStillDecodes() throws {
+        let data = Data(#"""
+        {
+          "period":"2026-08-09","date":0,"cost":1,"inputTokens":2,"outputTokens":3,
+          "cacheReadTokens":4,"totalTokens":9,
+          "agents":[{"name":"claude","cost":1,"totalTokens":9,"inputTokens":2,
+            "outputTokens":3,"cacheReadTokens":4,"models":[{"name":"claude-test",
+            "cost":1,"totalTokens":9,"inputTokens":2,"outputTokens":3,"cacheReadTokens":4}]}],
+          "models":[{"name":"claude-test","cost":1,"totalTokens":9,"inputTokens":2,
+            "outputTokens":3,"cacheReadTokens":4}]
+        }
+        """#.utf8)
+
+        let row = try JSONDecoder().decode(PeriodRow.self, from: data)
+
+        XCTAssertEqual(row.cacheCreationTokens, 0)
+        XCTAssertEqual(row.agents.first?.cacheCreationTokens, 0)
+        XCTAssertEqual(row.agents.first?.models.first?.cacheCreationTokens, 0)
+        XCTAssertEqual(row.models.first?.cacheCreationTokens, 0)
+    }
+
     // MARK: ccusage blocks
 
     func testBlocksReportDecodesActiveBlock() throws {

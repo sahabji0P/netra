@@ -24,35 +24,13 @@ extension MenuView {
 
     @ViewBuilder
     private var claudeBlockContent: some View {
-        if let quota = store.snapshot?.claudeQuota, !quota.windows.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(quota.windows, id: \.self) { window in
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(AgentPalette.color(for: "claude"))
-                            .frame(width: 6, height: 6)
-                        Text("Claude · \(window.label) limit")
-                            .font(.system(size: 11, weight: .medium))
-                        Spacer()
-                        if let resets = window.resetsAt {
-                            Text("resets \(resetText(resets))")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    meter(percent: window.usedPercent, status: "ok")
-                }
-                Text(claudeCaption(quota))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
-            }
-        } else if let block = store.snapshot?.activeBlock, block.end > .now {
+        if let block = store.snapshot?.activeBlock, block.end > .now {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Circle()
                         .fill(AgentPalette.color(for: "claude"))
                         .frame(width: 6, height: 6)
-                    Text("Claude · current 5h block")
+                    Text("Claude · local 5h estimate")
                         .font(.system(size: 11, weight: .medium))
                     Spacer()
                     TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -62,20 +40,20 @@ extension MenuView {
                     }
                 }
                 meter(percent: block.percentUsed, status: block.limitStatus)
-                Text("\(Format.cost(block.cost)) · \(Format.tokens(block.tokens)) tok · \(Int(block.percentUsed.rounded()))% of usual peak · → \(Format.cost(block.projectedCost)) projected")
+                Text("\(Format.cost(block.cost)) · \(Format.tokens(block.tokens)) tok · \(Int(block.percentUsed.rounded()))% of your usual peak · → \(Format.cost(block.projectedCost)) projected")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
             }
         } else {
-            placeholderRow("Claude · 5h block", detail: "idle — no active block", dotAgent: "claude")
+            placeholderRow("Claude · local estimate", detail: "idle — no active block", dotAgent: "claude")
         }
     }
 
     @ViewBuilder
     private var codexQuotaContent: some View {
-        if let quota = store.snapshot?.codexQuota, !quota.windows.isEmpty {
+        if let quota = store.snapshot?.codexQuota, !activeCodexWindows.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
-                ForEach(quota.windows, id: \.self) { window in
+                ForEach(activeCodexWindows, id: \.self) { window in
                     HStack(spacing: 6) {
                         Circle()
                             .fill(AgentPalette.color(for: "codex"))
@@ -91,7 +69,7 @@ extension MenuView {
                     }
                     meter(percent: window.usedPercent, status: "ok")
                 }
-                Text(codexCaption(quota))
+                Text(codexCaption(quota, windows: activeCodexWindows))
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
             }
@@ -100,22 +78,13 @@ extension MenuView {
         }
     }
 
-    private func claudeCaption(_ quota: ClaudeQuota) -> String {
-        var parts: [String] = []
-        if let plan = quota.subscriptionType { parts.append("\(plan) plan") }
-        // Say how old the number actually is; flag it once it stops being
-        // plausibly current (TTL is 5 min, so >15 min means fetches are failing).
-        let age = Format.age(since: quota.fetchedAt)
-        let isStale = Date.now.timeIntervalSince(quota.fetchedAt) > 900
-        parts.append(isStale ? "⚠ stale · Anthropic · \(age)" : "Anthropic · \(age)")
-        if let block = store.snapshot?.activeBlock, block.end > .now {
-            parts.append("this block \(Format.cost(block.cost)) → \(Format.cost(block.projectedCost)) proj")
-        }
-        return parts.joined(separator: " · ")
+    private var activeCodexWindows: [QuotaWindow] {
+        store.snapshot?.codexQuota?.activeWindows() ?? []
     }
 
-    private func codexCaption(_ quota: CodexQuota) -> String {
-        var parts: [String] = ["\(Int(quota.windows[0].usedPercent.rounded()))% used"]
+    private func codexCaption(_ quota: CodexQuota, windows: [QuotaWindow]) -> String {
+        let highestUsage = windows.map(\.usedPercent).max() ?? 0
+        var parts: [String] = ["\(Int(highestUsage.rounded()))% used"]
         if let plan = quota.planType { parts.append("\(plan) plan") }
         if let observed = quota.observedAt {
             parts.append("reported by Codex \(Format.age(since: observed))")

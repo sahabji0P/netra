@@ -84,8 +84,35 @@ struct ModelStat: Codable, Hashable, Identifiable, Sendable {
     var totalTokens: Int
     var inputTokens: Int
     var outputTokens: Int
+    var cacheCreationTokens: Int
     var cacheReadTokens: Int
     var id: String { name }
+
+    init(name: String, cost: Double, totalTokens: Int, inputTokens: Int, outputTokens: Int,
+         cacheCreationTokens: Int = 0, cacheReadTokens: Int) {
+        self.name = name
+        self.cost = cost
+        self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, cost, totalTokens, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        cost = try values.decode(Double.self, forKey: .cost)
+        totalTokens = try values.decode(Int.self, forKey: .totalTokens)
+        inputTokens = try values.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try values.decode(Int.self, forKey: .outputTokens)
+        cacheCreationTokens = try values.decodeIfPresent(Int.self, forKey: .cacheCreationTokens) ?? 0
+        cacheReadTokens = try values.decode(Int.self, forKey: .cacheReadTokens)
+    }
 }
 
 struct AgentStat: Codable, Hashable, Identifiable, Sendable {
@@ -94,9 +121,38 @@ struct AgentStat: Codable, Hashable, Identifiable, Sendable {
     var totalTokens: Int
     var inputTokens: Int
     var outputTokens: Int
+    var cacheCreationTokens: Int
     var cacheReadTokens: Int
     var models: [ModelStat]
     var id: String { name }
+
+    init(name: String, cost: Double, totalTokens: Int, inputTokens: Int, outputTokens: Int,
+         cacheCreationTokens: Int = 0, cacheReadTokens: Int, models: [ModelStat]) {
+        self.name = name
+        self.cost = cost
+        self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.models = models
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, cost, totalTokens, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, models
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        cost = try values.decode(Double.self, forKey: .cost)
+        totalTokens = try values.decode(Int.self, forKey: .totalTokens)
+        inputTokens = try values.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try values.decode(Int.self, forKey: .outputTokens)
+        cacheCreationTokens = try values.decodeIfPresent(Int.self, forKey: .cacheCreationTokens) ?? 0
+        cacheReadTokens = try values.decode(Int.self, forKey: .cacheReadTokens)
+        models = try values.decode([ModelStat].self, forKey: .models)
+    }
 }
 
 /// One aggregated period (a day, a week, or a month) with full bifurcation.
@@ -106,15 +162,50 @@ struct PeriodRow: Codable, Hashable, Identifiable, Sendable {
     var cost: Double
     var inputTokens: Int
     var outputTokens: Int
+    var cacheCreationTokens: Int
     var cacheReadTokens: Int
     var totalTokens: Int
     var agents: [AgentStat]
     var models: [ModelStat]
     var id: String { period }
 
+    init(period: String, date: Date, cost: Double, inputTokens: Int, outputTokens: Int,
+         cacheCreationTokens: Int = 0, cacheReadTokens: Int, totalTokens: Int,
+         agents: [AgentStat], models: [ModelStat]) {
+        self.period = period
+        self.date = date
+        self.cost = cost
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cacheCreationTokens = cacheCreationTokens
+        self.cacheReadTokens = cacheReadTokens
+        self.totalTokens = totalTokens
+        self.agents = agents
+        self.models = models
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case period, date, cost, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens
+        case totalTokens, agents, models
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        period = try values.decode(String.self, forKey: .period)
+        date = try values.decode(Date.self, forKey: .date)
+        cost = try values.decode(Double.self, forKey: .cost)
+        inputTokens = try values.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try values.decode(Int.self, forKey: .outputTokens)
+        cacheCreationTokens = try values.decodeIfPresent(Int.self, forKey: .cacheCreationTokens) ?? 0
+        cacheReadTokens = try values.decode(Int.self, forKey: .cacheReadTokens)
+        totalTokens = try values.decode(Int.self, forKey: .totalTokens)
+        agents = try values.decode([AgentStat].self, forKey: .agents)
+        models = try values.decode([ModelStat].self, forKey: .models)
+    }
+
     static func zero(period: String = "", date: Date = .now) -> PeriodRow {
         PeriodRow(period: period, date: date, cost: 0, inputTokens: 0, outputTokens: 0,
-                  cacheReadTokens: 0, totalTokens: 0, agents: [], models: [])
+                  cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 0, agents: [], models: [])
     }
 
     func agentStat(_ name: String) -> AgentStat? {
@@ -135,6 +226,20 @@ struct CodexQuota: Codable, Sendable {
     var windows: [QuotaWindow]
     var planType: String?
     var observedAt: Date?
+
+    /// Windows with a known reset remain usable until that reset. Older Codex
+    /// events sometimes omit the reset timestamp; keep those briefly only when
+    /// their observation itself is recent enough to be meaningful.
+    func activeWindows(now: Date = .now) -> [QuotaWindow] {
+        let undatedWindowFreshness: TimeInterval = 60 * 60
+        return windows.filter { window in
+            if let resetsAt = window.resetsAt {
+                return resetsAt > now
+            }
+            guard let observedAt, observedAt <= now else { return false }
+            return now.timeIntervalSince(observedAt) <= undatedWindowFreshness
+        }
+    }
 }
 
 /// The active 5-hour billing block, estimated locally by ccusage from agent
@@ -184,6 +289,7 @@ struct UsageSnapshot: Codable, Sendable {
             let formatter = DateFormatter()
             formatter.dateFormat = dateFormat
             formatter.calendar = calendar
+            formatter.timeZone = calendar.timeZone
             return (source ?? []).compactMap { row in
                 guard let date = formatter.date(from: row.period) else { return nil }
                 let agents = (row.agents ?? [])
@@ -191,6 +297,7 @@ struct UsageSnapshot: Codable, Sendable {
                         AgentStat(
                             name: agent.agent, cost: agent.totalCost, totalTokens: agent.totalTokens,
                             inputTokens: agent.inputTokens, outputTokens: agent.outputTokens,
+                            cacheCreationTokens: agent.cacheCreationTokens,
                             cacheReadTokens: agent.cacheReadTokens,
                             models: modelStats(agent.modelBreakdowns)
                         )
@@ -199,6 +306,7 @@ struct UsageSnapshot: Codable, Sendable {
                 return PeriodRow(
                     period: row.period, date: date, cost: row.totalCost,
                     inputTokens: row.inputTokens, outputTokens: row.outputTokens,
+                    cacheCreationTokens: row.cacheCreationTokens,
                     cacheReadTokens: row.cacheReadTokens,
                     totalTokens: row.totalTokens, agents: agents,
                     models: modelStats(row.modelBreakdowns)
@@ -214,6 +322,7 @@ struct UsageSnapshot: Codable, Sendable {
                         totalTokens: $0.inputTokens + $0.outputTokens
                             + $0.cacheCreationTokens + $0.cacheReadTokens,
                         inputTokens: $0.inputTokens, outputTokens: $0.outputTokens,
+                        cacheCreationTokens: $0.cacheCreationTokens,
                         cacheReadTokens: $0.cacheReadTokens
                     )
                 }

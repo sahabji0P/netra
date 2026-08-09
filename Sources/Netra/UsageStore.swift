@@ -1,6 +1,26 @@
 import Foundation
 import Observation
 
+private actor UsageSnapshotCache {
+    func load() -> UsageSnapshot? {
+        guard let data = try? Data(contentsOf: cacheURL) else { return nil }
+        return try? JSONDecoder().decode(UsageSnapshot.self, from: data)
+    }
+
+    func save(_ snapshot: UsageSnapshot) {
+        let directory = cacheURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? data.write(to: cacheURL, options: .atomic)
+    }
+
+    private var cacheURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Netra", isDirectory: true)
+            .appendingPathComponent("snapshot.json")
+    }
+}
+
 @MainActor
 @Observable
 final class UsageStore {
@@ -16,31 +36,28 @@ final class UsageStore {
     private(set) var state: State = .empty
 
     private let client = CCUsageClient()
+    private let preferences: AppPreferences
+    private let alerts = UsageAlertController()
+    private let cache = UsageSnapshotCache()
     private var refreshTask: Task<Void, Never>?
     private let staleAfter: TimeInterval = 60
-    /// The Anthropic usage endpoint is unofficial — poll it gently, not every
-    /// local refresh. Quota barely moves in five minutes anyway.
-    private let claudeQuotaTTL: TimeInterval = 300
-    private var lastClaudeQuotaAttempt: Date?
 
-    private var cacheURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Netra", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("snapshot.json")
-    }
-
-    init() {
-        if let data = try? Data(contentsOf: cacheURL),
-           let cached = try? JSONDecoder().decode(UsageSnapshot.self, from: data) {
-            snapshot = cached
-            state = .stale
+    init(preferences: AppPreferences = AppPreferences()) {
+        self.preferences = preferences
+        Task { [weak self] in
+            guard let self else { return }
+            if let cached = await cache.load(), snapshot == nil {
+                snapshot = cached
+                if state != .refreshing {
+                    state = .stale
+                }
+            }
+            await refresh()
         }
-        Task { await self.refresh() }
         startSafetyTimer()
     }
 
-    func refresh(forceQuota: Bool = false) async {
+    func refresh() async {
         guard refreshTask == nil else { return }
         state = .refreshing
         let task = Task {
@@ -53,15 +70,34 @@ final class UsageStore {
                     report = try await client.fetchReport()
                 }
                 // Block and quota data are bonuses — their failure must not fail the refresh.
-                let block = try? await client.fetchActiveBlock()
-                let codexQuota = await Task.detached { CodexQuotaReader.read() }.value
-                let claudeQuota = await refreshedClaudeQuota(force: forceQuota)
+                // Keep the last observed values when a secondary reader fails;
+                // a successful "no active block" result still clears that value.
+                let previousSnapshot = snapshot
+                let block: BlockStat?
+                do {
+                    block = try await client.fetchActiveBlock()
+                } catch {
+                    block = previousSnapshot?.activeBlock
+                }
+                let observedCodexQuota = await Task.detached { CodexQuotaReader.read() }.value
+                let codexQuota = observedCodexQuota ?? previousSnapshot?.codexQuota
                 let fresh = UsageSnapshot(fetchedAt: .now, report: report,
-                                          activeBlock: block ?? nil, codexQuota: codexQuota,
-                                          claudeQuota: claudeQuota)
+                                          activeBlock: block, codexQuota: codexQuota,
+                                          // A companion app cannot safely read Claude Code's
+                                          // Keychain item without repeated macOS authorization
+                                          // prompts. Keep the persisted field empty; the UI uses
+                                          // ccusage's explicitly-labelled local block estimate.
+                                          claudeQuota: nil)
                 snapshot = fresh
                 state = .fresh
-                persist(fresh)
+                await cache.save(fresh)
+                let alertConfiguration = preferences.alertConfiguration
+                Task {
+                    await alerts.processFreshSnapshot(
+                        fresh,
+                        configuration: alertConfiguration
+                    )
+                }
             } catch {
                 // A failed refresh never overwrites a good snapshot.
                 state = snapshot == nil ? .failed(error.localizedDescription) : .stale
@@ -70,25 +106,6 @@ final class UsageStore {
         refreshTask = task
         await task.value
         refreshTask = nil
-    }
-
-    /// Within the TTL the cached quota is reused; past it we refetch, and on
-    /// failure keep the old value — its fetchedAt lets the UI label it stale.
-    /// Failed attempts also respect the TTL (a 429 must not be retried every
-    /// minute just because the cached value is old or missing).
-    private func refreshedClaudeQuota(force: Bool) async -> ClaudeQuota? {
-        let existing = snapshot?.claudeQuota
-        if !force {
-            if let existing, Date.now.timeIntervalSince(existing.fetchedAt) < claudeQuotaTTL {
-                return existing
-            }
-            if let attempt = lastClaudeQuotaAttempt,
-               Date.now.timeIntervalSince(attempt) < claudeQuotaTTL {
-                return existing
-            }
-        }
-        lastClaudeQuotaAttempt = .now
-        return (try? await ClaudeQuotaFetcher.fetch()) ?? existing
     }
 
     /// Called when the popover opens: refresh only if the data has gone stale.
@@ -111,9 +128,4 @@ final class UsageStore {
         }
     }
 
-    private func persist(_ snapshot: UsageSnapshot) {
-        if let data = try? JSONEncoder().encode(snapshot) {
-            try? data.write(to: cacheURL, options: .atomic)
-        }
-    }
 }
