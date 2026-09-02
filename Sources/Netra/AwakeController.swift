@@ -1,11 +1,14 @@
 import Foundation
 import IOKit.pwr_mgt
 import Observation
+import os
 
 /// Holds (and releases) an IOKit power assertion that prevents idle system
 /// sleep. The display is still allowed to sleep — agents keep running with the
-/// screen dark. Assertions are released automatically by the OS if the process
-/// dies, so the failure mode is always "Mac sleeps normally".
+/// screen dark. Closing the lid or choosing Sleep explicitly still sleeps the
+/// Mac; the assertion only blocks *idle* sleep. Assertions are released
+/// automatically by the OS if the process dies, so the failure mode is always
+/// "Mac sleeps normally".
 @MainActor
 @Observable
 final class AwakeController {
@@ -18,14 +21,15 @@ final class AwakeController {
     private(set) var mode: Mode = .off
     private var assertionID: IOPMAssertionID = 0
     private var expiryTask: Task<Void, Never>?
+    private let log = Logger(subsystem: "com.sahabji0P.netra", category: "awake")
 
     var isAwake: Bool { mode != .off }
 
     var statusText: String {
         switch mode {
         case .off: "Mac sleeps normally"
-        case .indefinite: "Held awake until you turn it off"
-        case .until(let date): "Held awake until \(date.formatted(date: .omitted, time: .shortened))"
+        case .indefinite: "Blocking idle sleep until turned off"
+        case .until(let date): "Blocking idle sleep until \(date.formatted(date: .omitted, time: .shortened))"
         }
     }
 
@@ -49,7 +53,10 @@ final class AwakeController {
                 "Netra is keeping the Mac awake" as CFString,
                 &id
             )
-            guard result == kIOReturnSuccess else { return }
+            guard result == kIOReturnSuccess else {
+                log.error("IOPMAssertionCreateWithName failed: \(result)")
+                return
+            }
             assertionID = id
         }
         mode = newMode
@@ -73,13 +80,42 @@ final class AwakeController {
         mode = .off
     }
 
-    /// Locks the screen (sleep does this when a password is required) and puts
-    /// the Mac to sleep immediately. Releases any held assertion first.
+    /// Locks the screen immediately, then puts the Mac to sleep. Releases any
+    /// held assertion first. Locking uses the same login-framework call the
+    /// system's own ctrl-cmd-Q shortcut goes through; if that ever fails the
+    /// Mac still sleeps, and whether it wakes locked then depends on the
+    /// user's "require password after sleep" setting.
     func lockAndSleep() {
         release()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
-        process.arguments = ["sleepnow"]
-        try? process.run()
+        if !Self.lockScreen() {
+            log.error("screen lock unavailable; falling back to sleep only")
+        }
+        // Give loginwindow a beat to put the lock up before sleeping, so the
+        // wake never flashes the unlocked desktop.
+        Task { [log] in
+            try? await Task.sleep(for: .milliseconds(500))
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+            process.arguments = ["sleepnow"]
+            do {
+                try process.run()
+            } catch {
+                log.error("pmset sleepnow failed to launch: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// `SACLockScreenImmediate` is the only way to lock the screen on modern
+    /// macOS without Accessibility permission (CGSession was removed). It is
+    /// resolved dynamically so a future macOS that drops it degrades to
+    /// sleep-only instead of crashing.
+    private static func lockScreen() -> Bool {
+        guard let handle = dlopen(
+            "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login",
+            RTLD_NOW
+        ), let symbol = dlsym(handle, "SACLockScreenImmediate") else { return false }
+        typealias LockFunction = @convention(c) () -> Int32
+        _ = unsafeBitCast(symbol, to: LockFunction.self)()
+        return true
     }
 }
