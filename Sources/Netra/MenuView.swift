@@ -447,7 +447,7 @@ struct MenuView: View {
 
     private var limitsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Limits", detail: limitsSectionDetail)
+            sectionHeader("Subscriptions", detail: limitsSectionDetail)
             ForEach(limitProviders, id: \.self) { agent in
                 limitsContent(for: agent)
             }

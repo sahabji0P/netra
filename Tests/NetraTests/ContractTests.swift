@@ -235,21 +235,48 @@ final class ContractTests: XCTestCase {
 
     // MARK: Cursor usage-summary
 
-    func testCursorUsageSummaryParsesPercentResetAndPlan() throws {
+    func testCursorUsageBuildsIncludedApiAutoAndGrokWindows() throws {
         let now = Date(timeIntervalSince1970: 1_756_000_000)
         let quota = try XCTUnwrap(
-            CursorUsageFetcher.quota(fromSummary: fixture("cursor-usage-summary.json"),
-                                     fallbackPlan: nil, now: now)
+            CursorUsageFetcher.quota(
+                fromSummary: fixture("cursor-usage-summary.json"),
+                sandStatus: fixture("cursor-sand-usage.json"),
+                fallbackPlan: nil, now: now
+            )
         )
         XCTAssertEqual(quota.planType, "Pro")
         XCTAssertEqual(quota.fetchedAt, now)
-        // Included-usage headline uses plan.totalPercentUsed (not the lanes).
+        // Cursor's four distinct windows, in presentation order.
+        XCTAssertEqual(quota.windows.map(\.label),
+                       ["included usage", "API models", "auto models", "Grok Bot"])
+        func percent(_ label: String) throws -> Double {
+            try XCTUnwrap(quota.windows.first { $0.label == label }).usedPercent
+        }
+        XCTAssertEqual(try percent("included usage"), 12.92, accuracy: 0.001)
+        XCTAssertEqual(try percent("API models"), 80.56, accuracy: 0.001)
+        XCTAssertEqual(try percent("auto models"), 6.15, accuracy: 0.001)
+        XCTAssertEqual(try percent("Grok Bot"), 1.866406, accuracy: 0.001)
+        // The plan windows reset on the billing cycle; Grok Bot resets weekly.
         let included = try XCTUnwrap(quota.windows.first { $0.label == "included usage" })
-        XCTAssertEqual(included.usedPercent, 12.0, accuracy: 0.001)
-        XCTAssertNotNil(included.resetsAt, "billingCycleEnd ISO must parse")
-        // On-demand spend is a second meter: $5.00 of $50.00 = 10%.
-        let onDemand = try XCTUnwrap(quota.windows.first { $0.label == "on-demand spend" })
-        XCTAssertEqual(onDemand.usedPercent, 10.0, accuracy: 0.001)
+        let grok = try XCTUnwrap(quota.windows.first { $0.label == "Grok Bot" })
+        XCTAssertNotNil(included.resetsAt)
+        XCTAssertNotNil(grok.resetsAt)
+        XCTAssertNotEqual(included.resetsAt, grok.resetsAt)
+    }
+
+    func testCursorGrokWindowSkippedWhenNoIncludedLimit() {
+        let json = #"{"hasNonZeroIncludedLimit":false,"usagePercent":5.0}"#
+        XCTAssertNil(CursorUsageFetcher.grokWindow(fromSandStatus: Data(json.utf8)))
+    }
+
+    func testCursorUsageWithoutSandStatusStillShowsPlanWindows() throws {
+        let quota = try XCTUnwrap(
+            CursorUsageFetcher.quota(
+                fromSummary: fixture("cursor-usage-summary.json"),
+                sandStatus: nil, fallbackPlan: nil
+            )
+        )
+        XCTAssertEqual(quota.windows.map(\.label), ["included usage", "API models", "auto models"])
     }
 
     func testCursorUsageSummaryFallsBackToPlanRatioWithoutPercentFields() throws {
@@ -258,14 +285,15 @@ final class ContractTests: XCTestCase {
          "individualUsage":{"plan":{"enabled":true,"used":600,"limit":2000}}}
         """#
         let quota = try XCTUnwrap(
-            CursorUsageFetcher.quota(fromSummary: Data(json.utf8), fallbackPlan: "pro")
+            CursorUsageFetcher.quota(fromSummary: Data(json.utf8), sandStatus: nil, fallbackPlan: "pro")
         )
         XCTAssertEqual(quota.planType, "Team", "usage-summary membership wins over fallback")
+        XCTAssertEqual(quota.windows.map(\.label), ["included usage"])
         XCTAssertEqual(quota.windows.first?.usedPercent ?? 0, 30.0, accuracy: 0.001)
     }
 
-    func testCursorUsageSummaryUsesFallbackPlanAndRejectsEmpty() {
-        XCTAssertNil(CursorUsageFetcher.quota(fromSummary: Data("{}".utf8), fallbackPlan: "pro"))
+    func testCursorUsageSummaryRejectsEmpty() {
+        XCTAssertNil(CursorUsageFetcher.quota(fromSummary: Data("{}".utf8), sandStatus: nil, fallbackPlan: "pro"))
     }
 
     func testCursorUserIDExtractionAndExpiryGate() {

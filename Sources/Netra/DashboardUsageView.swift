@@ -263,7 +263,7 @@ struct DashboardUsageView: View {
     }
 
     private var limitsStrip: some View {
-        DashboardPanel(title: "Usage indicators now", detail: "Provider limits and labelled local estimates") {
+        DashboardPanel(title: "Subscriptions", detail: "Plan usage now · provider-reported, labelled estimates noted") {
             HStack(alignment: .top, spacing: 12) {
                 claudeLimits
                 Divider()

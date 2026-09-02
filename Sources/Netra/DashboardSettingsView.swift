@@ -173,7 +173,7 @@ struct DashboardSettingsView: View {
     }
 
     private var limitSettings: some View {
-        DashboardPanel(title: "Limits", detail: "Where the limit numbers come from") {
+        DashboardPanel(title: "Subscriptions", detail: "Where the plan-usage numbers come from") {
             VStack(alignment: .leading, spacing: 12) {
                 settingsToggle(
                     "Live Claude limits",

@@ -32,13 +32,17 @@ found in your local logs. The menu-bar popover is the curated view: Settings →
 Providers lets you toggle which providers appear there (hidden providers are
 removed from the popover's totals too, so its numbers stay consistent).
 
-**Cursor** keeps no usage data on local disk, so it's opt-in: turn on **Cursor
-usage** in Settings and Netra reads the login Cursor already saved on this Mac
-and queries Cursor's own account API for your included-usage and on-demand
-spend (with the billing-cycle reset). The login is sent only to cursor.com;
-this uses an undocumented endpoint that can change without notice.
+The **Subscriptions** section shows each plan you have and how much of it
+you've used. **Claude** and **Codex** appear here whenever a limit source is
+available (see below). **Cursor** is opt-in — Cursor keeps no usage data on
+local disk, so turn on **Cursor usage** in Settings and Netra reads the login
+Cursor already saved on this Mac and queries Cursor's own account API. It
+surfaces Cursor's separate windows — included usage, API (named-model) usage,
+Auto-model usage, on-demand spend, and the weekly Grok Bot allowance — each
+with its own reset. The login is sent only to cursor.com; this uses an
+undocumented endpoint that can change without notice.
 
-Limits: Codex limits are provider-reported from local rollout data. Claude
+Subscriptions: Codex limits are provider-reported from local rollout data. Claude
 limits are Anthropic's real percentages, read from the response Claude Code
 itself caches in `~/.claude.json` — including the model-scoped weekly bucket
 and your plan tier, with no Keychain access and no network. Turn on **Live

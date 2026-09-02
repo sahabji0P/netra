@@ -5,13 +5,18 @@ import os
 /// data on local disk, so this is the only source; it uses the login token
 /// Cursor itself stored (read-only) and sends it only to cursor.com.
 ///
-/// Read-only "cookie" path (as used by CodexBar): one GET to
-/// `cursor.com/api/usage-summary` returns the percent, the billing-cycle
-/// reset, and the plan in a single response, with no token refresh and no
-/// write-back to Cursor's store. The endpoint is undocumented and may change.
+/// Two read-only "cookie" endpoints (as used by CodexBar):
+///  - `GET /api/usage-summary` — the included-usage pool and its API/Auto
+///    sub-limits, plus the billing-cycle reset and the plan.
+///  - `POST /api/dashboard/get-sand-usage-status` — the weekly "Grok Bot"
+///    window. Best-effort; the plan windows still show if it fails.
+///
+/// No token refresh, no write-back to Cursor's store. The endpoints are
+/// undocumented and may change.
 enum CursorUsageFetcher {
     private static let log = Logger(subsystem: "com.sahabji0P.netra", category: "cursor")
     private static let summaryURL = URL(string: "https://cursor.com/api/usage-summary")!
+    private static let sandURL = URL(string: "https://cursor.com/api/dashboard/get-sand-usage-status")!
 
     enum CursorUsageError: Error {
         case noCredentials
@@ -23,81 +28,94 @@ enum CursorUsageFetcher {
         guard let credentials = CursorCredentialReader.read() else {
             throw CursorUsageError.noCredentials
         }
+        let cookie = "WorkosCursorSessionToken=\(credentials.userID)%3A%3A\(credentials.accessToken)"
 
-        var request = URLRequest(url: summaryURL)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(
-            "WorkosCursorSessionToken=\(credentials.userID)%3A%3A\(credentials.accessToken)",
-            forHTTPHeaderField: "Cookie"
-        )
-        request.timeoutInterval = 12
+        let summaryData = try await get(summaryURL, cookie: cookie)
+        // The Grok Bot window lives behind a second, POST endpoint; its failure
+        // must not drop the plan windows.
+        let sandData = try? await postEmpty(sandURL, cookie: cookie)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw CursorUsageError.http(-1) }
-        guard http.statusCode == 200 else {
-            log.error("cursor usage-summary HTTP \(http.statusCode)")
-            throw CursorUsageError.http(http.statusCode)
-        }
-
-        guard let quota = quota(fromSummary: data, fallbackPlan: credentials.membershipType, now: now) else {
+        guard let quota = quota(
+            fromSummary: summaryData, sandStatus: sandData,
+            fallbackPlan: credentials.membershipType, now: now
+        ) else {
             throw CursorUsageError.decoding
         }
         return quota
     }
 
-    /// Parses the `usage-summary` response. Split out so the (undocumented,
-    /// schema-unstable) contract can be locked down with fixture tests.
-    static func quota(fromSummary data: Data, fallbackPlan: String?, now: Date = .now) -> CursorQuota? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+    // MARK: Parsing (split out for fixture tests)
+
+    /// Builds Cursor's usage windows from the two endpoint responses.
+    static func quota(
+        fromSummary summaryData: Data,
+        sandStatus sandData: Data?,
+        fallbackPlan: String?,
+        now: Date = .now
+    ) -> CursorQuota? {
+        guard let summary = try? JSONSerialization.jsonObject(with: summaryData) as? [String: Any] else {
             return nil
         }
 
-        let reset = (object["billingCycleEnd"] as? String).flatMap(ClaudeQuotaFetcher.parseDate)
-        let individual = object["individualUsage"] as? [String: Any]
-        let team = object["teamUsage"] as? [String: Any]
+        let cycleReset = (summary["billingCycleEnd"] as? String).flatMap(ClaudeQuotaFetcher.parseDate)
+        let individual = summary["individualUsage"] as? [String: Any]
         let plan = individual?["plan"] as? [String: Any]
 
         var windows: [QuotaWindow] = []
-        if let percent = includedPercent(plan: plan, individual: individual, team: team) {
-            windows.append(QuotaWindow(label: "included usage", usedPercent: percent, resetsAt: reset))
-        }
-        // On-demand spend, when the user has a finite cap, as a second meter.
+        // The included pool and its two sub-lanes: named/API models (which
+        // carry their own sub-limit) and Cursor's auto model selection.
+        appendPlanWindow(&windows, plan, key: "totalPercentUsed", label: "included usage", reset: cycleReset)
+        appendPlanWindow(&windows, plan, key: "apiPercentUsed", label: "API models", reset: cycleReset)
+        appendPlanWindow(&windows, plan, key: "autoPercentUsed", label: "auto models", reset: cycleReset)
+        // On-demand spend, when the user has a finite cap.
         if let onDemand = individual?["onDemand"] as? [String: Any],
            onDemand["enabled"] as? Bool == true,
-           let limit = cents(onDemand["limit"]), limit > 0,
-           let used = cents(onDemand["used"]) {
+           let limit = number(onDemand["limit"]), limit > 0,
+           let used = number(onDemand["used"]) {
             windows.append(QuotaWindow(
                 label: "on-demand spend",
-                usedPercent: min(used / limit * 100, 100),
-                resetsAt: reset
+                usedPercent: clampPercent(used / limit * 100),
+                resetsAt: cycleReset
             ))
+        }
+        // Weekly Grok Bot window from the second endpoint.
+        if let sandData, let grok = grokWindow(fromSandStatus: sandData) {
+            windows.append(grok)
+        }
+
+        if windows.isEmpty {
+            // Enterprise/legacy shapes can omit the plan block; fall back to the
+            // plan's own used/limit ratio so the row is not silently dropped.
+            if let percent = ratioPercent(plan) {
+                windows.append(QuotaWindow(label: "included usage", usedPercent: percent, resetsAt: cycleReset))
+            }
         }
         guard !windows.isEmpty else { return nil }
 
-        let membership = (object["membershipType"] as? String) ?? fallbackPlan
+        let membership = (summary["membershipType"] as? String) ?? fallbackPlan
         return CursorQuota(windows: windows, planType: planLabel(membership), fetchedAt: now)
     }
 
-    /// CodexBar's headline-percent precedence: the plan's total percent, then
-    /// the mean of the auto/api lanes, then either lane, then used/limit for
-    /// the plan, the personal overall cap, and finally the team pool.
-    private static func includedPercent(
-        plan: [String: Any]?, individual: [String: Any]?, team: [String: Any]?
-    ) -> Double? {
-        if let total = plan?["totalPercentUsed"] as? Double { return clampPercent(total) }
-        let auto = plan?["autoPercentUsed"] as? Double
-        let api = plan?["apiPercentUsed"] as? Double
-        if let auto, let api { return clampPercent((auto + api) / 2) }
-        if let api { return clampPercent(api) }
-        if let auto { return clampPercent(auto) }
-        if let percent = ratioPercent(plan) { return percent }
-        if let percent = ratioPercent(individual?["overall"] as? [String: Any]) { return percent }
-        if let percent = ratioPercent(team?["pooled"] as? [String: Any]) { return percent }
-        return nil
+    /// The Grok Bot weekly window. Skipped when the plan has no included Grok
+    /// allowance (`hasNonZeroIncludedLimit != true`).
+    static func grokWindow(fromSandStatus data: Data) -> QuotaWindow? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["hasNonZeroIncludedLimit"] as? Bool == true,
+              let percent = number(object["usagePercent"]) else { return nil }
+        let reset = (object["nextResetTimestampUtc"] as? String).flatMap(ClaudeQuotaFetcher.parseDate)
+        return QuotaWindow(label: "Grok Bot", usedPercent: clampPercent(percent), resetsAt: reset)
+    }
+
+    private static func appendPlanWindow(
+        _ windows: inout [QuotaWindow], _ plan: [String: Any]?,
+        key: String, label: String, reset: Date?
+    ) {
+        guard let percent = number(plan?[key]) else { return }
+        windows.append(QuotaWindow(label: label, usedPercent: clampPercent(percent), resetsAt: reset))
     }
 
     private static func ratioPercent(_ bucket: [String: Any]?) -> Double? {
-        guard let bucket, let used = cents(bucket["used"]), let limit = cents(bucket["limit"]),
+        guard let bucket, let used = number(bucket["used"]), let limit = number(bucket["limit"]),
               limit > 0 else { return nil }
         return clampPercent(used / limit * 100)
     }
@@ -108,7 +126,7 @@ enum CursorUsageFetcher {
         min(max(value, 0), 100)
     }
 
-    private static func cents(_ value: Any?) -> Double? {
+    private static func number(_ value: Any?) -> Double? {
         (value as? NSNumber)?.doubleValue
     }
 
@@ -126,5 +144,38 @@ enum CursorUsageFetcher {
         case "hobby": return "Hobby"
         default: return membership.prefix(1).uppercased() + membership.dropFirst()
         }
+    }
+
+    // MARK: Requests
+
+    private static func get(_ url: URL, cookie: String) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        request.timeoutInterval = 12
+        return try await send(request)
+    }
+
+    private static func postEmpty(_ url: URL, cookie: String) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The dashboard POST endpoints require a matching Origin (CSRF check).
+        request.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
+        request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        request.httpBody = Data("{}".utf8)
+        request.timeoutInterval = 12
+        return try await send(request)
+    }
+
+    private static func send(_ request: URLRequest) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw CursorUsageError.http(-1) }
+        guard http.statusCode == 200 else {
+            log.error("cursor \(request.url?.lastPathComponent ?? "?", privacy: .public) HTTP \(http.statusCode)")
+            throw CursorUsageError.http(http.statusCode)
+        }
+        return data
     }
 }
