@@ -1,138 +1,209 @@
 import SwiftUI
 
-// MARK: - Current 5h block (local estimate from ccusage blocks)
+// MARK: - Provider limit rows (menu popover)
 
 extension MenuView {
-    /// Each provider has its own limit system: Claude gets the local 5h-block
-    /// estimate, Codex gets the server-reported quota from its session logs.
-    /// Shown inline under each agent row on the overview, or below the chart
-    /// when that agent's tab is selected — limits have no section of their own.
+    /// Each provider has its own limit system: Claude gets real subscription
+    /// limits when the opt-in OAuth fetch is enabled (falling back to the
+    /// clearly-labelled local 5h estimate), Codex gets the server-reported
+    /// quota from its session logs. Providers without a limit source render
+    /// nothing — Settings explains what can be connected.
     @ViewBuilder
     func limitsContent(for agent: String) -> some View {
         switch agent {
         case "claude":
-            claudeBlockContent
+            claudeLimitContent
         case "codex":
             codexQuotaContent
-        case "opencode":
-            placeholderRow("OpenCode limits", detail: "no unified quota source connected")
+        case "cursor":
+            cursorQuotaContent
         default:
-            placeholderRow("\(AgentPalette.displayName(agent)) limits",
-                           detail: "tracked server-side · not connected yet")
+            EmptyView()
         }
     }
 
     @ViewBuilder
-    private var claudeBlockContent: some View {
-        if let block = store.snapshot?.activeBlock, block.end > .now {
+    private var cursorQuotaContent: some View {
+        if let quota = store.snapshot?.cursorQuota {
+            let windows = quota.activeWindows()
+            if !windows.isEmpty {
+                providerLimitBlock(
+                    agent: "cursor",
+                    title: "Cursor",
+                    badge: badgeText(plan: quota.planType, fallback: "reported"),
+                    windows: windows,
+                    caption: "Reported by Cursor \(Format.age(since: quota.fetchedAt))"
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var claudeLimitContent: some View {
+        if let quota = store.snapshot?.claudeQuota, !quota.activeWindows().isEmpty {
+            providerLimitBlock(
+                agent: "claude",
+                title: "Claude",
+                badge: badgeText(plan: quota.subscriptionType, fallback: "reported"),
+                windows: quota.activeWindows(),
+                caption: claudeQuotaCaption(quota)
+            )
+        } else if let block = store.snapshot?.activeBlock, block.end > .now {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(AgentPalette.color(for: "claude"))
-                        .frame(width: 6, height: 6)
-                    Text("Claude · local 5h estimate")
-                        .font(.system(size: 11, weight: .medium))
-                    Spacer()
+                limitTitleRow(agent: "claude", title: "Claude", badge: "local estimate") {
                     TimelineView(.periodic(from: .now, by: 30)) { context in
-                        Text("ends in \(remaining(until: block.end, now: context.date))")
-                            .font(.system(size: 10))
+                        Text("block ends in \(remaining(until: block.end, now: context.date))")
+                            .font(.system(size: 9.5))
                             .foregroundStyle(.tertiary)
                     }
                 }
-                meter(percent: block.percentUsed, status: block.limitStatus)
-                Text("\(Format.cost(block.cost)) · \(Format.tokens(block.tokens)) tok · \(Int(block.percentUsed.rounded()))% of your usual peak · → \(Format.cost(block.projectedCost)) projected")
-                    .font(.system(size: 9.5))
+                limitWindowRow(
+                    label: "5h block vs your peak",
+                    percent: block.percentUsed,
+                    displayText: Format.peakPercent(block.percentUsed),
+                    trailing: nil,
+                    status: block.limitStatus,
+                    agent: "claude"
+                )
+                Text("\(Format.cost(block.cost)) so far · \(Format.cost(block.projectedCost)) projected this block")
+                    .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
             }
-        } else {
-            placeholderRow("Claude · local estimate", detail: "idle — no active block", dotAgent: "claude")
         }
     }
 
     @ViewBuilder
     private var codexQuotaContent: some View {
-        if let quota = store.snapshot?.codexQuota, !activeCodexWindows.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(activeCodexWindows, id: \.self) { window in
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(AgentPalette.color(for: "codex"))
-                            .frame(width: 6, height: 6)
-                        Text("Codex · \(window.label) limit")
-                            .font(.system(size: 11, weight: .medium))
-                        Spacer()
-                        if let resets = window.resetsAt {
-                            Text("resets \(resetText(resets))")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    meter(percent: window.usedPercent, status: "ok")
-                }
-                Text(codexCaption(quota, windows: activeCodexWindows))
-                    .font(.system(size: 9.5))
+        if let quota = store.snapshot?.codexQuota {
+            let windows = quota.activeWindows()
+            if !windows.isEmpty {
+                providerLimitBlock(
+                    agent: "codex",
+                    title: "Codex",
+                    badge: badgeText(plan: quota.planType, fallback: "reported"),
+                    windows: windows,
+                    caption: quota.observedAt.map {
+                        "Reported by Codex \(Format.age(since: $0))"
+                    } ?? "From the latest Codex session"
+                )
+            }
+        }
+    }
+
+    private func claudeQuotaCaption(_ quota: ClaudeQuota) -> String {
+        let age = Format.age(since: quota.fetchedAt)
+        switch quota.source {
+        case .oauth: return "Reported by Anthropic \(age)"
+        case .claudeCodeCache: return "Via Claude Code \(age)"
+        }
+    }
+
+    private func badgeText(plan: String?, fallback: String) -> String {
+        guard let plan, !plan.isEmpty else { return fallback }
+        return "\(plan) plan"
+    }
+
+    private func providerLimitBlock(
+        agent: String,
+        title: String,
+        badge: String,
+        windows: [QuotaWindow],
+        caption: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            limitTitleRow(agent: agent, title: title, badge: badge) {
+                Text(caption)
+                    .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
-        } else {
-            placeholderRow("Codex limits", detail: "no session data yet — run Codex once", dotAgent: "codex")
+            ForEach(windows, id: \.self) { window in
+                limitWindowRow(
+                    label: window.label,
+                    percent: window.usedPercent,
+                    displayText: "\(Int(window.usedPercent.rounded()))%",
+                    trailing: window.resetsAt.map { "resets \(resetText($0))" },
+                    status: "ok",
+                    agent: agent
+                )
+            }
         }
+        .accessibilityElement(children: .combine)
     }
 
-    private var activeCodexWindows: [QuotaWindow] {
-        store.snapshot?.codexQuota?.activeWindows() ?? []
-    }
-
-    private func codexCaption(_ quota: CodexQuota, windows: [QuotaWindow]) -> String {
-        let highestUsage = windows.map(\.usedPercent).max() ?? 0
-        var parts: [String] = ["\(Int(highestUsage.rounded()))% used"]
-        if let plan = quota.planType { parts.append("\(plan) plan") }
-        if let observed = quota.observedAt {
-            parts.append("reported by Codex \(Format.age(since: observed))")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    private func placeholderRow(_ title: String, detail: String, dotAgent: String? = nil) -> some View {
+    private func limitTitleRow(
+        agent: String,
+        title: String,
+        badge: String,
+        @ViewBuilder trailing: () -> some View
+    ) -> some View {
         HStack(spacing: 6) {
-            if let dotAgent {
-                Circle()
-                    .fill(AgentPalette.color(for: dotAgent).opacity(0.5))
-                    .frame(width: 6, height: 6)
-            }
+            Circle()
+                .fill(AgentPalette.color(for: agent))
+                .frame(width: 6, height: 6)
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 11, weight: .semibold))
+            Text(badge)
+                .font(.system(size: 8.5, weight: .medium))
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1.5)
+                .background(.quaternary.opacity(0.7), in: Capsule())
             Spacer()
-            Text(detail)
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+            trailing()
         }
     }
 
-    private func meter(percent: Double, status: String) -> some View {
+    /// One quota window: label, meter, percent, and the reset countdown.
+    private func limitWindowRow(
+        label: String,
+        percent: Double,
+        displayText: String,
+        trailing: String?,
+        status: String,
+        agent: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(displayText)
+                    .font(.system(size: 10, weight: .semibold))
+                    .monospacedDigit()
+                if let trailing {
+                    Text(trailing)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            meter(percent: percent, status: status, agent: agent)
+        }
+        .padding(.leading, 12)
+    }
+
+    private func meter(percent: Double, status: String, agent: String) -> some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary)
                 Capsule()
-                    .fill(meterColor(percent: percent, status: status))
+                    .fill(LimitStyle.meterColor(percent: percent, status: status, agent: agent))
                     .frame(width: geo.size.width * min(percent / 100, 1))
             }
         }
         .frame(height: 4)
     }
 
-    private func meterColor(percent: Double, status: String) -> Color {
-        if status == "exceeds" || percent >= 95 { return Color(red: 0.80, green: 0.35, blue: 0.32) }
-        if status == "warning" || percent >= 75 { return Color(red: 0.83, green: 0.55, blue: 0.25) }
-        return .accentColor
-    }
-
     private func resetText(_ date: Date) -> String {
         let hours = date.timeIntervalSinceNow / 3600
+        if hours < 1 {
+            return "in \(max(1, Int(date.timeIntervalSinceNow / 60)))m"
+        }
         if hours < 24 {
             return "at \(date.formatted(date: .omitted, time: .shortened))"
         }
-        return "in \(Int((hours / 24).rounded()))d"
+        return "in \(Int(ceil(hours / 24)))d"
     }
 
     private func remaining(until end: Date, now: Date) -> String {

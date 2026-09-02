@@ -41,6 +41,9 @@ final class AppPreferences {
         static let showsProviderBreakdown = "preferences.popover.showsProviderBreakdown"
         static let showsActivityChart = "preferences.popover.showsActivityChart"
         static let showsKeepAwake = "preferences.popover.showsKeepAwake"
+        static let hiddenMenuProviders = "preferences.popover.hiddenProviders"
+        static let claudeQuotaEnabled = "preferences.limits.claudeQuotaEnabled"
+        static let cursorUsageEnabled = "preferences.limits.cursorUsageEnabled"
         static let dailyTokenAlertEnabled = "preferences.alerts.dailyTokens.enabled"
         static let dailyTokenAlertThreshold = "preferences.alerts.dailyTokens.threshold"
         static let providerLimitAlertEnabled = "preferences.alerts.providerLimit.enabled"
@@ -65,6 +68,36 @@ final class AppPreferences {
     }
     var showsKeepAwake: Bool {
         didSet { defaults.set(showsKeepAwake, forKey: Key.showsKeepAwake) }
+    }
+    /// Providers the user has hidden from the menu popover. The dashboard
+    /// always shows every provider; this only trims the glanceable surface.
+    var hiddenMenuProviders: Set<String> {
+        didSet { defaults.set(hiddenMenuProviders.sorted(), forKey: Key.hiddenMenuProviders) }
+    }
+    /// Opt-in: fetch real Claude subscription limits with the OAuth token
+    /// Claude Code keeps in the Keychain. Off by default because reading that
+    /// Keychain item triggers a one-time macOS authorization prompt.
+    var claudeQuotaEnabled: Bool {
+        didSet { defaults.set(claudeQuotaEnabled, forKey: Key.claudeQuotaEnabled) }
+    }
+    /// Opt-in: Cursor writes no usage data to local disk, so the only source is
+    /// Cursor's own saved login token plus its undocumented usage API. Off by
+    /// default because it reads another app's credential store and calls an
+    /// endpoint that can change without notice.
+    var cursorUsageEnabled: Bool {
+        didSet { defaults.set(cursorUsageEnabled, forKey: Key.cursorUsageEnabled) }
+    }
+
+    func isProviderVisibleInMenu(_ name: String) -> Bool {
+        !hiddenMenuProviders.contains(name.lowercased())
+    }
+
+    func setProvider(_ name: String, visibleInMenu visible: Bool) {
+        if visible {
+            hiddenMenuProviders.remove(name.lowercased())
+        } else {
+            hiddenMenuProviders.insert(name.lowercased())
+        }
     }
     var dailyTokenAlertEnabled: Bool {
         didSet { defaults.set(dailyTokenAlertEnabled, forKey: Key.dailyTokenAlertEnabled) }
@@ -95,6 +128,9 @@ final class AppPreferences {
         showsProviderBreakdown = defaults.object(forKey: Key.showsProviderBreakdown) as? Bool ?? true
         showsActivityChart = defaults.object(forKey: Key.showsActivityChart) as? Bool ?? true
         showsKeepAwake = defaults.object(forKey: Key.showsKeepAwake) as? Bool ?? true
+        hiddenMenuProviders = Set(defaults.stringArray(forKey: Key.hiddenMenuProviders) ?? [])
+        claudeQuotaEnabled = defaults.object(forKey: Key.claudeQuotaEnabled) as? Bool ?? false
+        cursorUsageEnabled = defaults.object(forKey: Key.cursorUsageEnabled) as? Bool ?? false
         dailyTokenAlertEnabled = defaults.object(forKey: Key.dailyTokenAlertEnabled) as? Bool ?? false
         dailyTokenAlertThreshold = max(defaults.object(forKey: Key.dailyTokenAlertThreshold) as? Int ?? 1_000_000, 1)
         providerLimitAlertEnabled = defaults.object(forKey: Key.providerLimitAlertEnabled) as? Bool ?? false

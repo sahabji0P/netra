@@ -211,6 +211,50 @@ struct PeriodRow: Codable, Hashable, Identifiable, Sendable {
     func agentStat(_ name: String) -> AgentStat? {
         agents.first { $0.name == name }
     }
+
+    /// The usage this row's named agents do not account for (ccusage rows can
+    /// carry totals above the per-agent sums). Surfaced as the synthetic
+    /// "other" provider so nothing silently disappears from the UI.
+    var unattributed: AgentStat? {
+        let other = AgentStat(
+            name: "other",
+            cost: max(0, cost - agents.reduce(0) { $0 + $1.cost }),
+            totalTokens: max(0, totalTokens - agents.reduce(0) { $0 + $1.totalTokens }),
+            inputTokens: max(0, inputTokens - agents.reduce(0) { $0 + $1.inputTokens }),
+            outputTokens: max(0, outputTokens - agents.reduce(0) { $0 + $1.outputTokens }),
+            cacheCreationTokens: max(0, cacheCreationTokens - agents.reduce(0) { $0 + $1.cacheCreationTokens }),
+            cacheReadTokens: max(0, cacheReadTokens - agents.reduce(0) { $0 + $1.cacheReadTokens }),
+            models: agents.isEmpty ? models : []
+        )
+        let hasUsage = other.cost > 0.000_001 || other.totalTokens > 0 || other.inputTokens > 0 ||
+            other.outputTokens > 0 || other.cacheCreationTokens > 0 || other.cacheReadTokens > 0
+        return hasUsage ? other : nil
+    }
+
+    /// The row restricted to providers the user still wants to see: hidden
+    /// agents are removed and every total is rebuilt from the visible parts,
+    /// so summary numbers, provider rows, and charts stay consistent.
+    /// Hiding "other" drops the unattributed remainder as well.
+    func filtered(hidingProviders hidden: Set<String>) -> PeriodRow {
+        guard !hidden.isEmpty else { return self }
+        var parts = agents.filter { !hidden.contains($0.name.lowercased()) }
+        if !hidden.contains("other"), let other = unattributed {
+            parts.append(other)
+        }
+        let visibleNamed = parts.filter { $0.name != "other" }
+        return PeriodRow(
+            period: period,
+            date: date,
+            cost: parts.reduce(0) { $0 + $1.cost },
+            inputTokens: parts.reduce(0) { $0 + $1.inputTokens },
+            outputTokens: parts.reduce(0) { $0 + $1.outputTokens },
+            cacheCreationTokens: parts.reduce(0) { $0 + $1.cacheCreationTokens },
+            cacheReadTokens: parts.reduce(0) { $0 + $1.cacheReadTokens },
+            totalTokens: parts.reduce(0) { $0 + $1.totalTokens },
+            agents: visibleNamed,
+            models: hidden.isEmpty ? models : visibleNamed.flatMap(\.models)
+        )
+    }
 }
 
 /// One provider-reported quota window (e.g. Codex 5h / weekly / monthly).
@@ -242,6 +286,22 @@ struct CodexQuota: Codable, Sendable {
     }
 }
 
+/// Cursor usage as reported by Cursor's own account API. Cursor keeps no
+/// usage data on local disk; this is fetched (opt-in) using the login token
+/// Cursor itself stores. Freshness is the fetch time.
+struct CursorQuota: Codable, Sendable {
+    var windows: [QuotaWindow]
+    var planType: String?
+    var fetchedAt: Date
+
+    func activeWindows(now: Date = .now) -> [QuotaWindow] {
+        windows.filter { window in
+            guard let resetsAt = window.resetsAt else { return true }
+            return resetsAt > now
+        }
+    }
+}
+
 /// The active 5-hour billing block, estimated locally by ccusage from agent
 /// logs. "Limit" is the user's own historical peak block, not a provider quota.
 struct BlockStat: Codable, Sendable {
@@ -264,8 +324,20 @@ struct BlockStat: Codable, Sendable {
         tokens = block.totalTokens
         cost = block.costUSD
         projectedCost = block.projection?.totalCost ?? block.costUSD
-        percentUsed = block.tokenLimitStatus?.percentUsed ?? 0
-        limitStatus = block.tokenLimitStatus?.status ?? "ok"
+        // ccusage's own percentUsed extrapolates with a cache-read-inclusive
+        // burn rate and routinely reports absurd projections (>1000%).
+        // Compare what was actually used so far against the historical-peak
+        // limit instead, and derive the status from that.
+        if let limit = block.tokenLimitStatus?.limit, limit > 0 {
+            percentUsed = Double(block.totalTokens) / Double(limit) * 100
+        } else {
+            percentUsed = 0
+        }
+        switch percentUsed {
+        case 100...: limitStatus = "exceeds"
+        case 80...: limitStatus = "warning"
+        default: limitStatus = "ok"
+        }
     }
 }
 
@@ -277,13 +349,16 @@ struct UsageSnapshot: Codable, Sendable {
     var activeBlock: BlockStat?
     var codexQuota: CodexQuota?
     var claudeQuota: ClaudeQuota?
+    var cursorQuota: CursorQuota?
 
     init(fetchedAt: Date, report: CCUnifiedReport, activeBlock: BlockStat?,
-         codexQuota: CodexQuota?, claudeQuota: ClaudeQuota?, calendar: Calendar = .current) {
+         codexQuota: CodexQuota?, claudeQuota: ClaudeQuota?, cursorQuota: CursorQuota? = nil,
+         calendar: Calendar = .current) {
         self.fetchedAt = fetchedAt
         self.activeBlock = activeBlock
         self.codexQuota = codexQuota
         self.claudeQuota = claudeQuota
+        self.cursorQuota = cursorQuota
 
         func rows(_ source: [CCRow]?, dateFormat: String) -> [PeriodRow] {
             let formatter = DateFormatter()
@@ -377,6 +452,14 @@ struct UsageSnapshot: Codable, Sendable {
 enum Format {
     static func cost(_ value: Double) -> String {
         value >= 100 ? String(format: "$%.0f", value) : String(format: "$%.2f", value)
+    }
+
+    /// Percent-of-own-peak values can exceed 100% (the current block is the
+    /// biggest yet); switch to a multiplier so "1,223%" reads as "12.2×".
+    static func peakPercent(_ value: Double) -> String {
+        value <= 100
+            ? "\(Int(value.rounded()))%"
+            : String(format: "%.1f×", value / 100)
     }
 
     static func tokens(_ value: Int) -> String {

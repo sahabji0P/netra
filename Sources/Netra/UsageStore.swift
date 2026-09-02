@@ -87,13 +87,38 @@ final class UsageStore {
                 }
                 let observedCodexQuota = await Task.detached { CodexQuotaReader.read() }.value
                 let codexQuota = observedCodexQuota ?? previousSnapshot?.codexQuota
+                // Real Claude limits, best source first:
+                // 1. Live OAuth fetch — opt-in, because reading Claude Code's
+                //    Keychain item triggers a one-time macOS authorization
+                //    prompt.
+                // 2. Claude Code's own cached server response in ~/.claude.json
+                //    — real Anthropic percentages, no Keychain, no network.
+                // 3. The last observed quota (original fetchedAt preserved, so
+                //    the UI shows honest freshness).
+                var claudeQuota: ClaudeQuota?
+                if preferences.claudeQuotaEnabled {
+                    claudeQuota = try? await ClaudeQuotaFetcher.fetch()
+                }
+                if claudeQuota == nil {
+                    claudeQuota = await Task.detached { ClaudeCachedQuotaReader.read() }.value
+                }
+                // Keep whichever observation is newest — an earlier live fetch
+                // can outrank a stale Claude Code cache.
+                if let previous = previousSnapshot?.claudeQuota,
+                   previous.fetchedAt > (claudeQuota?.fetchedAt ?? .distantPast) {
+                    claudeQuota = previous
+                }
+                // Cursor usage is opt-in: it reads Cursor's saved login and
+                // queries Cursor's undocumented usage API. Its failure keeps
+                // the last observed value.
+                var cursorQuota: CursorQuota?
+                if preferences.cursorUsageEnabled {
+                    cursorQuota = (try? await CursorUsageFetcher.fetch())
+                        ?? previousSnapshot?.cursorQuota
+                }
                 let fresh = UsageSnapshot(fetchedAt: .now, report: report,
                                           activeBlock: block, codexQuota: codexQuota,
-                                          // A companion app cannot safely read Claude Code's
-                                          // Keychain item without repeated macOS authorization
-                                          // prompts. Keep the persisted field empty; the UI uses
-                                          // ccusage's explicitly-labelled local block estimate.
-                                          claudeQuota: nil)
+                                          claudeQuota: claudeQuota, cursorQuota: cursorQuota)
                 snapshot = fresh
                 state = .fresh
                 await cache.save(fresh)

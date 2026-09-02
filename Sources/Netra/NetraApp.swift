@@ -66,16 +66,23 @@ struct NetraApp: App {
         case .iconOnly:
             return nil
         case .todayCost:
-            let cost = snapshot.currentRow(for: .today).cost
+            let cost = snapshot.currentRow(for: .today)
+                .filtered(hidingProviders: preferences.hiddenMenuProviders).cost
             return cost > 0 ? Format.cost(cost) : nil
         case .todayTokens:
-            let tokens = snapshot.currentRow(for: .today).totalTokens
+            let tokens = snapshot.currentRow(for: .today)
+                .filtered(hidingProviders: preferences.hiddenMenuProviders).totalTokens
             return tokens > 0 ? Format.tokens(tokens) : nil
         case .highestProviderLimit:
             let codex = snapshot.codexQuota?.activeWindows()
                 .map(\.usedPercent)
                 .max()
-            let claudeEstimate = snapshot.activeBlock
+            let claude = snapshot.claudeQuota?.activeWindows()
+                .map(\.usedPercent)
+                .max()
+            // The local block estimate stands in only while real Claude
+            // limits are unavailable.
+            let claudeEstimate = claude ?? snapshot.activeBlock
                 .flatMap { $0.end > .now ? $0.percentUsed : nil }
             let highest = [codex, claudeEstimate].compactMap { $0 }.max()
             return highest.map { "\(Int($0.rounded()))%" }

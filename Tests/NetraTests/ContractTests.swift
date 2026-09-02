@@ -144,6 +144,47 @@ final class ContractTests: XCTestCase {
         )
     }
 
+    // MARK: Claude Code cached usage (~/.claude.json)
+
+    func testClaudeCachedUsageParsesLimitsIncludingModelScopedWindow() throws {
+        let quota = try XCTUnwrap(
+            ClaudeCachedQuotaReader.quota(fromClaudeConfig: fixture("claude-config-cached-usage.json"))
+        )
+        XCTAssertEqual(quota.source, .claudeCodeCache)
+        XCTAssertEqual(quota.subscriptionType, "Max 5x")
+        XCTAssertEqual(
+            quota.fetchedAt.timeIntervalSince1970, 1_788_291_226.489, accuracy: 0.001
+        )
+        // limits[] is preferred over the fixed window keys because it carries
+        // the model-scoped weekly bucket the fixed keys report as null.
+        XCTAssertEqual(quota.windows.map(\.label), ["5h", "weekly", "weekly · Fable"])
+        XCTAssertEqual(quota.windows.map(\.usedPercent), [20, 3, 2])
+        for window in quota.windows {
+            XCTAssertNotNil(window.resetsAt, "microsecond ISO timestamps must parse")
+        }
+    }
+
+    func testClaudeCachedUsageFallsBackToFixedWindowsWithoutLimitsArray() throws {
+        let json = #"""
+        {"cachedUsageUtilization":{"fetchedAtMs":1788291226489,"utilization":{
+          "five_hour":{"utilization":41,"resets_at":"2026-09-02T00:10:00.222493+00:00"},
+          "seven_day":{"utilization":7,"resets_at":null}}}}
+        """#
+        let quota = try XCTUnwrap(
+            ClaudeCachedQuotaReader.quota(fromClaudeConfig: Data(json.utf8))
+        )
+        XCTAssertEqual(quota.windows.map(\.label), ["5h", "weekly"])
+        XCTAssertEqual(quota.windows[0].usedPercent, 41, accuracy: 0.001)
+        XCTAssertNil(quota.subscriptionType)
+    }
+
+    func testClaudeCachedUsageRejectsConfigWithoutUtilization() {
+        XCTAssertNil(ClaudeCachedQuotaReader.quota(fromClaudeConfig: Data("{}".utf8)))
+        XCTAssertNil(ClaudeCachedQuotaReader.quota(
+            fromClaudeConfig: Data(#"{"cachedUsageUtilization":{"utilization":{}}}"#.utf8)
+        ))
+    }
+
     // MARK: Claude Code Keychain credential payload
 
     func testKeychainCredentialsParse() throws {
@@ -180,6 +221,75 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(quota.planType, "team")
         XCTAssertNotNil(quota.observedAt)
         XCTAssertNotNil(quota.windows[0].resetsAt)
+    }
+
+    func testCodexLegacyResetsInSecondsParsesRelativeToTimestamp() throws {
+        // CLI ≤ v0.47 wrote `resets_in_seconds`; v0.48+ writes epoch `resets_at`.
+        let line = #"{"timestamp":"2026-08-30T12:00:00.000Z","payload":{"rate_limits":{"primary":{"used_percent":12.5,"window_minutes":300,"resets_in_seconds":600},"plan_type":"plus"}}}"#
+        let quota = try XCTUnwrap(CodexQuotaReader.quota(fromLine: line))
+        let observedAt = try XCTUnwrap(quota.observedAt)
+        let resetsAt = try XCTUnwrap(quota.windows.first?.resetsAt)
+        XCTAssertEqual(resetsAt.timeIntervalSince(observedAt), 600, accuracy: 0.001)
+        XCTAssertEqual(quota.windows.first?.label, "5h")
+    }
+
+    // MARK: Cursor usage-summary
+
+    func testCursorUsageSummaryParsesPercentResetAndPlan() throws {
+        let now = Date(timeIntervalSince1970: 1_756_000_000)
+        let quota = try XCTUnwrap(
+            CursorUsageFetcher.quota(fromSummary: fixture("cursor-usage-summary.json"),
+                                     fallbackPlan: nil, now: now)
+        )
+        XCTAssertEqual(quota.planType, "Pro")
+        XCTAssertEqual(quota.fetchedAt, now)
+        // Included-usage headline uses plan.totalPercentUsed (not the lanes).
+        let included = try XCTUnwrap(quota.windows.first { $0.label == "included usage" })
+        XCTAssertEqual(included.usedPercent, 12.0, accuracy: 0.001)
+        XCTAssertNotNil(included.resetsAt, "billingCycleEnd ISO must parse")
+        // On-demand spend is a second meter: $5.00 of $50.00 = 10%.
+        let onDemand = try XCTUnwrap(quota.windows.first { $0.label == "on-demand spend" })
+        XCTAssertEqual(onDemand.usedPercent, 10.0, accuracy: 0.001)
+    }
+
+    func testCursorUsageSummaryFallsBackToPlanRatioWithoutPercentFields() throws {
+        let json = #"""
+        {"billingCycleEnd":"2026-09-13T10:05:25.000Z","membershipType":"team",
+         "individualUsage":{"plan":{"enabled":true,"used":600,"limit":2000}}}
+        """#
+        let quota = try XCTUnwrap(
+            CursorUsageFetcher.quota(fromSummary: Data(json.utf8), fallbackPlan: "pro")
+        )
+        XCTAssertEqual(quota.planType, "Team", "usage-summary membership wins over fallback")
+        XCTAssertEqual(quota.windows.first?.usedPercent ?? 0, 30.0, accuracy: 0.001)
+    }
+
+    func testCursorUsageSummaryUsesFallbackPlanAndRejectsEmpty() {
+        XCTAssertNil(CursorUsageFetcher.quota(fromSummary: Data("{}".utf8), fallbackPlan: "pro"))
+    }
+
+    func testCursorUserIDExtractionAndExpiryGate() {
+        // Synthetic JWT: header.payload.sig, payload = {"sub":"google-oauth2|abc.123","exp":...}
+        func jwt(sub: String, exp: Double) -> String {
+            func seg(_ obj: [String: Any]) -> String {
+                let data = try! JSONSerialization.data(withJSONObject: obj)
+                return data.base64EncodedString()
+                    .replacingOccurrences(of: "+", with: "-")
+                    .replacingOccurrences(of: "/", with: "_")
+                    .replacingOccurrences(of: "=", with: "")
+            }
+            return "\(seg(["alg": "HS256"])).\(seg(["sub": sub, "exp": exp])).sig"
+        }
+        let future = Date.now.timeIntervalSince1970 + 3600
+        let token = jwt(sub: "google-oauth2|abc.123_ID", exp: future)
+        XCTAssertEqual(CursorCredentialReader.userID(fromToken: token), "abc.123_ID")
+        XCTAssertTrue(CursorCredentialReader.tokenIsUsable(token))
+
+        let expired = jwt(sub: "auth0|x", exp: Date.now.timeIntervalSince1970 - 10)
+        XCTAssertFalse(CursorCredentialReader.tokenIsUsable(expired))
+        // A sub with a cookie-unsafe character is rejected (injection guard).
+        let unsafe = jwt(sub: "auth0|bad;value", exp: future)
+        XCTAssertNil(CursorCredentialReader.userID(fromToken: unsafe))
     }
 
     func testCodexRolloutIgnoresIrrelevantLines() {

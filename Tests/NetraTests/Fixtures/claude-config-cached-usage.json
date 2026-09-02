@@ -1,0 +1,79 @@
+{
+  "oauthAccount": {
+    "accountUuid": "00000000-0000-4000-8000-000000000000",
+    "emailAddress": "synthetic@example.com",
+    "userRateLimitTier": "default_claude_max_5x",
+    "seatTier": "team_tier_1",
+    "billingType": "stripe_subscription",
+    "hasExtraUsageEnabled": true
+  },
+  "cachedUsageUtilization": {
+    "fetchedAtMs": 1788291226489,
+    "accountUuid": "00000000-0000-4000-8000-000000000000",
+    "utilization": {
+      "five_hour": {
+        "utilization": 20,
+        "resets_at": "2026-09-02T00:10:00.222493+00:00",
+        "limit_dollars": null,
+        "used_dollars": null,
+        "remaining_dollars": null,
+        "locked_reason": null
+      },
+      "seven_day": {
+        "utilization": 3,
+        "resets_at": "2026-09-07T02:00:00.222523+00:00",
+        "limit_dollars": null,
+        "used_dollars": null,
+        "remaining_dollars": null,
+        "locked_reason": null
+      },
+      "seven_day_opus": null,
+      "seven_day_sonnet": null,
+      "extra_usage": {
+        "is_enabled": true,
+        "monthly_limit": 69900,
+        "used_credits": 0,
+        "utilization": null,
+        "currency": "USD",
+        "decimal_places": 2
+      },
+      "limits": [
+        {
+          "kind": "session",
+          "group": "session",
+          "percent": 20,
+          "severity": "normal",
+          "resets_at": "2026-09-02T00:10:00.222493+00:00",
+          "scope": null,
+          "is_active": true
+        },
+        {
+          "kind": "weekly_all",
+          "group": "weekly",
+          "percent": 3,
+          "severity": "normal",
+          "resets_at": "2026-09-07T02:00:00.222523+00:00",
+          "scope": null,
+          "is_active": false
+        },
+        {
+          "kind": "weekly_scoped",
+          "group": "weekly",
+          "percent": 2,
+          "severity": "normal",
+          "resets_at": "2026-09-07T02:00:00.222796+00:00",
+          "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null },
+          "is_active": false
+        }
+      ],
+      "spend": {
+        "used": { "amount_minor": 0, "currency": "USD", "exponent": 2 },
+        "limit": { "amount_minor": 69900, "currency": "USD", "exponent": 2 },
+        "percent": 0,
+        "severity": "normal",
+        "enabled": true
+      },
+      "member_dashboard_available": false
+    }
+  }
+}

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DashboardSettingsView: View {
     @Bindable var preferences: AppPreferences
+    var store: UsageStore
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
@@ -10,6 +11,8 @@ struct DashboardSettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 menuBarSettings
+                providerSettings
+                limitSettings
                 alertSettings
                 generalSettings
             }
@@ -19,6 +22,14 @@ struct DashboardSettingsView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .navigationTitle("Settings")
+        .onChange(of: preferences.claudeQuotaEnabled) { _, enabled in
+            // Fetch (or drop) the real quota right away so the limits UI
+            // reflects the choice without waiting for the next timer tick.
+            if enabled { Task { await store.refresh() } }
+        }
+        .onChange(of: preferences.cursorUsageEnabled) { _, enabled in
+            if enabled { Task { await store.refresh() } }
+        }
         .task {
             while !Task.isCancelled {
                 await preferences.refreshNotificationAuthorization()
@@ -80,6 +91,111 @@ struct DashboardSettingsView: View {
         }
     }
 
+    /// Every provider Netra has seen usage for (plus any that are currently
+    /// hidden, so they can always be re-enabled), ranked by recent cost.
+    private var knownProviders: [String] {
+        var ranked = store.snapshot?.agentNames.map { $0.lowercased() } ?? []
+        if store.snapshot?.monthly.contains(where: { $0.unattributed != nil }) == true {
+            ranked.append("other")
+        }
+        for hidden in preferences.hiddenMenuProviders.sorted() where !ranked.contains(hidden) {
+            ranked.append(hidden)
+        }
+        return ranked
+    }
+
+    private var providerSettings: some View {
+        DashboardPanel(
+            title: "Providers",
+            detail: "The dashboard always shows everything"
+        ) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Choose which providers appear in the menu-bar popover. Hidden providers are removed from its totals, chart, and list — the dashboard keeps showing them.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 8)
+                if knownProviders.isEmpty {
+                    Text("No provider usage detected yet. Run a coding agent once and refresh.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ForEach(knownProviders, id: \.self) { provider in
+                        providerVisibilityRow(provider)
+                        if provider != knownProviders.last {
+                            Divider().padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func providerVisibilityRow(_ provider: String) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(AgentPalette.color(for: provider))
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(AgentPalette.displayName(provider))
+                    .font(.system(size: 12, weight: .medium))
+                if provider == "other" {
+                    Text("Usage ccusage couldn't attribute to a specific agent")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+            Text(providerPeriodCost(provider))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Toggle(
+                "Show \(AgentPalette.displayName(provider)) in the menu popover",
+                isOn: Binding(
+                    get: { preferences.isProviderVisibleInMenu(provider) },
+                    set: { preferences.setProvider(provider, visibleInMenu: $0) }
+                )
+            )
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
+        }
+    }
+
+    private func providerPeriodCost(_ provider: String) -> String {
+        guard let row = store.snapshot?.currentRow(for: .month) else { return "" }
+        if provider == "other" {
+            guard let other = row.unattributed else { return "" }
+            return "\(Format.cost(other.cost)) this month"
+        }
+        guard let stat = row.agentStat(provider) else { return "" }
+        return "\(Format.cost(stat.cost)) this month"
+    }
+
+    private var limitSettings: some View {
+        DashboardPanel(title: "Limits", detail: "Where the limit numbers come from") {
+            VStack(alignment: .leading, spacing: 12) {
+                settingsToggle(
+                    "Live Claude limits",
+                    detail: "Netra already shows the real limits Claude Code last cached — no setup needed. Turn this on to fetch fresh numbers straight from Anthropic on every refresh, using the sign-in Claude Code already has. macOS will ask once to allow Keychain access — choose “Always Allow”. The token is only ever sent to api.anthropic.com.",
+                    isOn: $preferences.claudeQuotaEnabled
+                )
+                Label(
+                    "Claude limits come from Anthropic (live, or via Claude Code's cache). Codex limits are read from its local session logs. Only when neither is available does Claude fall back to a clearly-labelled local estimate.",
+                    systemImage: "gauge.with.needle"
+                )
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+                Divider()
+                settingsToggle(
+                    "Cursor usage",
+                    detail: "Cursor stores no usage data locally, so Netra reads your Cursor app login and queries Cursor's own usage API for your request quota. It uses the login Cursor already saved on this Mac and sends it only to Cursor. This relies on an undocumented endpoint that can change without notice.",
+                    isOn: $preferences.cursorUsageEnabled
+                )
+            }
+        }
+    }
+
     private var alertSettings: some View {
         DashboardPanel(title: "Alerts", detail: "Evaluated after each successful local refresh") {
             VStack(alignment: .leading, spacing: 18) {
@@ -106,7 +222,7 @@ struct DashboardSettingsView: View {
                 Divider()
                 alertToggle(
                     title: "Usage indicator alert",
-                    detail: "Notify when Codex's provider-reported usage or Claude's local historical-peak estimate reaches this level.",
+                    detail: "Notify when a provider-reported limit (Codex, and Claude when real limits are enabled) or Claude's local historical-peak estimate reaches this level.",
                     isOn: $preferences.providerLimitAlertEnabled
                 ) {
                     HStack(spacing: 4) {
@@ -124,7 +240,7 @@ struct DashboardSettingsView: View {
                     .font(.system(size: 11))
                 }
                 Label(
-                    "Codex percentages are provider-reported limits. Claude is percent of your local historical peak—not subscription capacity. Netra alerts once per threshold crossing.",
+                    "Provider-reported percentages are real limits. Claude's local estimate is percent of your own historical peak—not subscription capacity. Netra alerts once per threshold crossing.",
                     systemImage: "bell.badge"
                 )
                 .font(.system(size: 10.5))

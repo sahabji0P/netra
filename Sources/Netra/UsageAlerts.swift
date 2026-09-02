@@ -89,9 +89,40 @@ enum UsageAlertEvaluator {
                 }
             }
 
+            // Cursor's provider-reported usage alerts like Codex.
+            if let cursor = snapshot.cursorQuota {
+                for window in cursor.activeWindows(now: now) where
+                    window.resetsAt != nil && window.usedPercent >= threshold {
+                    active.append(providerCandidate(
+                        provider: "Cursor",
+                        window: window.label,
+                        usedPercent: window.usedPercent,
+                        threshold: threshold,
+                        cycle: cycleIdentifier(window.resetsAt)
+                    ))
+                }
+            }
+
+            // Real Claude limits (opt-in OAuth fetch) alert like any other
+            // provider-reported quota; windows without a reset never alert.
+            if let claude = snapshot.claudeQuota {
+                for window in claude.activeWindows(now: now) where
+                    window.resetsAt != nil && window.usedPercent >= threshold {
+                    active.append(providerCandidate(
+                        provider: "Claude",
+                        window: window.label,
+                        usedPercent: window.usedPercent,
+                        threshold: threshold,
+                        cycle: cycleIdentifier(window.resetsAt)
+                    ))
+                }
+            }
+
             // ccusage's active block is a local historical estimate, not an
-            // Anthropic quota. Keep that provenance explicit in the alert.
-            if let block = snapshot.activeBlock,
+            // Anthropic quota. Keep that provenance explicit in the alert,
+            // and skip it entirely once real Claude limits are available.
+            if snapshot.claudeQuota == nil,
+               let block = snapshot.activeBlock,
                block.end > now,
                block.percentUsed >= threshold {
                 active.append(UsageAlertCandidate(

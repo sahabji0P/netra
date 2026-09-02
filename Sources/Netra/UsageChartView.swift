@@ -22,9 +22,8 @@ extension MenuView {
     }
 
     private var chartPoints: [ChartPoint] {
-        guard let snapshot = store.snapshot else { return [] }
         let calendar = Calendar.current
-        return snapshot.rows(for: tab).compactMap { row in
+        return visibleRows(for: tab).compactMap { row in
             guard row.date >= chartDomain.lowerBound else { return nil }
             let label: String
             switch tab {
@@ -46,20 +45,17 @@ extension MenuView {
     }
 
     private var providerBarPoints: [ProviderBarPoint] {
-        guard let snapshot = store.snapshot else { return [] }
-        return snapshot.rows(for: tab).flatMap { row -> [ProviderBarPoint] in
+        visibleRows(for: tab).flatMap { row -> [ProviderBarPoint] in
             guard row.date >= chartDomain.lowerBound else { return [] }
             var points = row.agents.map {
                 ProviderBarPoint(period: row.period, date: row.date, provider: $0.name, cost: $0.cost)
             }
-            let attributedCost = row.agents.reduce(0) { $0 + $1.cost }
-            let attributedTokens = row.agents.reduce(0) { $0 + $1.totalTokens }
-            if row.cost - attributedCost > 0.000_001 || row.totalTokens > attributedTokens {
+            if let other = row.unattributed, other.cost > 0.000_001 || other.totalTokens > 0 {
                 points.append(ProviderBarPoint(
                     period: row.period,
                     date: row.date,
                     provider: "other",
-                    cost: max(0, row.cost - attributedCost)
+                    cost: other.cost
                 ))
             }
             return points
@@ -104,7 +100,7 @@ extension MenuView {
                 y: .value("Equivalent API cost", point.cost)
             )
             .foregroundStyle(barColor(for: point.provider, period: point.period))
-            .cornerRadius(1.5)
+            .cornerRadius(2)
         }
         .chartXScale(domain: chartDomain)
         .chartYAxis(.hidden)
@@ -182,12 +178,12 @@ extension MenuView {
 
     private func barColor(for provider: String, period: String) -> Color {
         let opacity: Double
-        if period == selectedPeriod {
+        if period == selectedPeriod || period == hoveredPeriod {
             opacity = 1
-        } else if period == hoveredPeriod {
-            opacity = 0.8
+        } else if selectedPeriod == nil && hoveredPeriod == nil {
+            opacity = 0.85
         } else {
-            opacity = selectedPeriod == nil ? 0.6 : 0.22
+            opacity = 0.35
         }
         return AgentPalette.color(for: provider).opacity(opacity)
     }

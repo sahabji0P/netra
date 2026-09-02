@@ -49,7 +49,7 @@ struct DashboardView: View {
             case .usage:
                 DashboardUsageView(store: store)
             case .settings:
-                DashboardSettingsView(preferences: preferences)
+                DashboardSettingsView(preferences: preferences, store: store)
             }
         }
         .frame(minWidth: 900, minHeight: 650)

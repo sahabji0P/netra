@@ -107,11 +107,19 @@ enum PricingOverrides {
             guard let input = cost("input_cost_per_token"),
                   let output = cost("output_cost_per_token") else { continue }
             var priced = ["inputCostPerToken": input, "outputCostPerToken": output]
-            if let cacheWrite = cost("cache_creation_input_token_cost") {
-                priced["cacheCreationInputTokenCost"] = cacheWrite
-            }
-            if let cacheRead = cost("cache_read_input_token_cost") {
-                priced["cacheReadInputTokenCost"] = cacheRead
+            // ccusage's ConfigPricingOverride accepts these too; omitting the
+            // long-context tiers silently underprices >200k-token requests.
+            let optionalFields = [
+                ("cache_creation_input_token_cost", "cacheCreationInputTokenCost"),
+                ("cache_read_input_token_cost", "cacheReadInputTokenCost"),
+                ("input_cost_per_token_above_200k_tokens", "inputCostPerTokenAbove200kTokens"),
+                ("output_cost_per_token_above_200k_tokens", "outputCostPerTokenAbove200kTokens"),
+                ("cache_creation_input_token_cost_above_200k_tokens", "cacheCreationInputTokenCostAbove200kTokens"),
+                ("cache_read_input_token_cost_above_200k_tokens", "cacheReadInputTokenCostAbove200kTokens"),
+                ("max_input_tokens", "maxInputTokens"),
+            ]
+            for (litellmKey, ccusageKey) in optionalFields {
+                if let value = cost(litellmKey) { priced[ccusageKey] = value }
             }
             return priced
         }

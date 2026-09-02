@@ -115,6 +115,62 @@ struct DashboardUsageView: View {
     @State private var range: DashboardUsageRange = .sevenDays
     @State private var metric: DashboardMetric = .cost
     @State private var breakdown: DashboardBreakdown = .models
+    @State private var hoveredDate: Date?
+
+    private var hoveredRow: PeriodRow? {
+        guard let hoveredDate else { return nil }
+        return chartRows.first { Calendar.current.isDate($0.date, inSameDayAs: hoveredDate) }
+    }
+
+    private func hoverDimmed(_ date: Date) -> Bool {
+        guard let hoveredRow else { return false }
+        return !Calendar.current.isDate(hoveredRow.date, inSameDayAs: date)
+    }
+
+    private func activityTooltip(_ row: PeriodRow) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(row.date.formatted(date: .abbreviated, time: .omitted))
+                .font(.system(size: 10, weight: .semibold))
+            ForEach(tooltipAgents(row), id: \.name) { agent in
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(AgentPalette.color(for: agent.name))
+                        .frame(width: 6, height: 6)
+                    Text(AgentPalette.shortName(agent.name))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    Text(metric == .cost ? Format.cost(agent.cost) : Format.tokens(agent.totalTokens))
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                }
+            }
+            Divider()
+            HStack {
+                Text("Total")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 12)
+                Text(metric == .cost ? Format.cost(row.cost) : Format.tokens(row.totalTokens))
+                    .font(.system(size: 10, weight: .semibold))
+                    .monospacedDigit()
+            }
+        }
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(.separator.opacity(0.6), lineWidth: 0.5)
+        }
+    }
+
+    private func tooltipAgents(_ row: PeriodRow) -> [AgentStat] {
+        var agents = row.agents
+        if let other = row.unattributed {
+            agents.append(other)
+        }
+        return agents
+    }
 
     private var selection: DashboardUsageSelection {
         DashboardUsageAggregator.selection(from: store.snapshot, range: range)
@@ -209,11 +265,43 @@ struct DashboardUsageView: View {
     private var limitsStrip: some View {
         DashboardPanel(title: "Usage indicators now", detail: "Provider limits and labelled local estimates") {
             HStack(alignment: .top, spacing: 12) {
-                codexLimits
+                claudeLimits
                 Divider()
-                claudeLocalLimit
+                codexLimits
+                if store.snapshot?.cursorQuota?.activeWindows().isEmpty == false {
+                    Divider()
+                    cursorLimits
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var cursorLimits: some View {
+        if let quota = store.snapshot?.cursorQuota {
+            let windows = quota.activeWindows()
+            if !windows.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    limitHeading(
+                        agent: "cursor",
+                        title: "Cursor",
+                        source: quota.planType.map { "\($0) plan" } ?? "Provider reported"
+                    )
+                    ForEach(windows, id: \.self) { window in
+                        limitRow(
+                            agent: "cursor",
+                            label: window.label,
+                            percent: window.usedPercent,
+                            eventAt: window.resetsAt
+                        )
+                    }
+                    Text("Reported by Cursor \(Format.age(since: quota.fetchedAt))")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -223,7 +311,12 @@ struct DashboardUsageView: View {
             VStack(alignment: .leading, spacing: 10) {
                 limitHeading(agent: "codex", title: "Codex", source: "Provider reported")
                 ForEach(activeCodexWindows, id: \.self) { window in
-                    limitRow(label: window.label, percent: window.usedPercent, eventAt: window.resetsAt)
+                    limitRow(
+                        agent: "codex",
+                        label: window.label,
+                        percent: window.usedPercent,
+                        eventAt: window.resetsAt
+                    )
                 }
                 if let observedAt = quota.observedAt {
                     Text("Observed in a Codex session \(Format.age(since: observedAt))")
@@ -238,23 +331,63 @@ struct DashboardUsageView: View {
     }
 
     @ViewBuilder
-    private var claudeLocalLimit: some View {
-        if let block = store.snapshot?.activeBlock, block.end > .now {
+    private var claudeLimits: some View {
+        if let quota = store.snapshot?.claudeQuota, !quota.activeWindows().isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                limitHeading(agent: "claude", title: "Claude", source: "Local estimate")
-                limitRow(
-                    label: "Current 5h block",
-                    percent: block.percentUsed,
-                    eventAt: block.end,
-                    eventVerb: "ends"
+                limitHeading(
+                    agent: "claude",
+                    title: "Claude",
+                    source: quota.subscriptionType.map { "\($0) plan" } ?? "Provider reported"
                 )
-                Text("\(Int(block.percentUsed.rounded()))% of your usual historical peak · \(Format.tokens(block.tokens)) processed · \(Format.cost(block.projectedCost)) projected")
+                ForEach(quota.activeWindows(), id: \.self) { window in
+                    limitRow(
+                        agent: "claude",
+                        label: window.label,
+                        percent: window.usedPercent,
+                        eventAt: window.resetsAt
+                    )
+                }
+                Text(quota.source == .oauth
+                     ? "Reported by Anthropic \(Format.age(since: quota.fetchedAt))"
+                     : "Anthropic-reported, via Claude Code's local cache · updated \(Format.age(since: quota.fetchedAt))")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        } else if let block = store.snapshot?.activeBlock, block.end > .now {
+            VStack(alignment: .leading, spacing: 10) {
+                limitHeading(agent: "claude", title: "Claude", source: "Local estimate")
+                limitRow(
+                    agent: "claude",
+                    label: "Current 5h block vs your peak",
+                    percent: block.percentUsed,
+                    displayText: Format.peakPercent(block.percentUsed),
+                    eventAt: block.end,
+                    eventVerb: "ends"
+                )
+                Text("Compared with your heaviest block of the last 60 days — not an Anthropic quota · \(Format.tokens(block.tokens)) processed · \(Format.cost(block.projectedCost)) projected")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                claudeQuotaHint
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            emptyLimit(agent: "claude", title: "Claude · Local estimate", detail: "No active five-hour block")
+            VStack(alignment: .leading, spacing: 8) {
+                emptyLimit(agent: "claude", title: "Claude", detail: "No active five-hour block")
+                claudeQuotaHint
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Points at the opt-in for provider-reported Claude limits while the
+    /// dashboard is still showing the weaker local estimate.
+    @ViewBuilder
+    private var claudeQuotaHint: some View {
+        if store.snapshot?.claudeQuota == nil {
+            Text("Run Claude Code once (or turn on **Live Claude limits** in Settings) to see your actual subscription limits.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -275,8 +408,10 @@ struct DashboardUsageView: View {
     }
 
     private func limitRow(
+        agent: String,
         label: String,
         percent: Double,
+        displayText: String? = nil,
         eventAt: Date?,
         eventVerb: String = "resets"
     ) -> some View {
@@ -285,7 +420,7 @@ struct DashboardUsageView: View {
                 Text(label)
                     .font(.system(size: 11))
                 Spacer()
-                Text("\(Int(percent.rounded()))%")
+                Text(displayText ?? "\(Int(percent.rounded()))%")
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 if let eventAt {
                     Text("· \(eventVerb) \(resetText(eventAt))")
@@ -297,7 +432,7 @@ struct DashboardUsageView: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(.quaternary)
                     Capsule()
-                        .fill(limitColor(percent))
+                        .fill(LimitStyle.meterColor(percent: percent, status: "ok", agent: agent))
                         .frame(width: geometry.size.width * min(max(percent / 100, 0), 1))
                 }
             }
@@ -375,32 +510,43 @@ struct DashboardUsageView: View {
                     .frame(height: 190)
             } else {
                 Chart(activityPoints) { point in
-                    AreaMark(
-                        x: .value("Period", point.date),
-                        yStart: .value("Baseline", 0),
-                        yEnd: .value(metric.rawValue, point.value(for: metric)),
-                        series: .value("Provider", point.provider)
+                    BarMark(
+                        x: .value("Period", point.date, unit: .day),
+                        y: .value(metric.rawValue, point.value(for: metric))
                     )
-                    .foregroundStyle(AgentPalette.color(for: point.provider).opacity(0.10))
-                    .interpolationMethod(.catmullRom)
-                    LineMark(
-                        x: .value("Period", point.date),
-                        y: .value(metric.rawValue, point.value(for: metric)),
-                        series: .value("Provider", point.provider)
+                    .foregroundStyle(
+                        AgentPalette.color(for: point.provider)
+                            .opacity(hoverDimmed(point.date) ? 0.35 : 1)
                     )
-                    .foregroundStyle(AgentPalette.color(for: point.provider))
-                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.catmullRom)
-                    if range == .today {
-                        PointMark(
-                            x: .value("Period", point.date),
-                            y: .value(metric.rawValue, point.value(for: metric))
-                        )
-                        .foregroundStyle(AgentPalette.color(for: point.provider))
-                        .symbolSize(48)
+                    .cornerRadius(2.5)
+                    if let hoveredRow {
+                        RuleMark(x: .value("Period", hoveredRow.date, unit: .day))
+                            .foregroundStyle(.clear)
+                            .annotation(
+                                position: .top,
+                                spacing: 6,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
+                            ) {
+                                activityTooltip(hoveredRow)
+                            }
                     }
                 }
                 .chartLegend(.hidden)
+                .chartOverlay { proxy in
+                    GeometryReader { _ in
+                        Rectangle()
+                            .fill(.clear)
+                            .contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active(let location):
+                                    hoveredDate = proxy.value(atX: location.x)
+                                case .ended:
+                                    hoveredDate = nil
+                                }
+                            }
+                    }
+                }
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
                         AxisGridLine().foregroundStyle(.separator.opacity(0.45))
@@ -483,9 +629,9 @@ struct DashboardUsageView: View {
     private var tokenComposition: some View {
         DashboardPanel(title: "Token composition", detail: "Processed input and output") {
             VStack(spacing: 12) {
-                tokenRow("Uncached input", value: currentRow.inputTokens, color: .secondary)
-                tokenRow("Cached input", value: currentRow.cacheReadTokens, color: .accentColor)
-                tokenRow("Cache writes", value: currentRow.cacheCreationTokens, color: .orange)
+                tokenRow("Uncached input", value: currentRow.inputTokens, color: Color(nsColor: .systemGray))
+                tokenRow("Cached input", value: currentRow.cacheReadTokens, color: Color(red: 0.22, green: 0.53, blue: 0.90))
+                tokenRow("Cache writes", value: currentRow.cacheCreationTokens, color: Color(red: 0.93, green: 0.63, blue: 0))
                 tokenRow("Output", value: currentRow.outputTokens, color: .primary)
                 Divider()
                 HStack {
@@ -620,7 +766,7 @@ struct DashboardUsageView: View {
 
     private func providerDots(_ row: PeriodRow) -> some View {
         var providers = row.agents.prefix(5).map(\.name)
-        if unattributedAgent(for: row) != nil, !providers.contains("other") {
+        if row.unattributed != nil, !providers.contains("other") {
             providers.append("other")
         }
         return HStack(spacing: 4) {
@@ -670,7 +816,7 @@ struct DashboardUsageView: View {
                     tokens: agent.totalTokens
                 )
             }
-            if let other = unattributedAgent(for: row) {
+            if let other = row.unattributed {
                 points.append(ProviderActivityPoint(
                     period: row.period,
                     date: row.date,
@@ -685,32 +831,10 @@ struct DashboardUsageView: View {
 
     private var providerRows: [AgentStat] {
         var rows = currentRow.agents
-        if let other = unattributedAgent(for: currentRow) {
+        if let other = currentRow.unattributed {
             rows.append(other)
         }
         return rows
-    }
-
-    private func unattributedAgent(for row: PeriodRow) -> AgentStat? {
-        let attributedCost = row.agents.reduce(0) { $0 + $1.cost }
-        let attributedTotal = row.agents.reduce(0) { $0 + $1.totalTokens }
-        let attributedInput = row.agents.reduce(0) { $0 + $1.inputTokens }
-        let attributedOutput = row.agents.reduce(0) { $0 + $1.outputTokens }
-        let attributedCacheCreation = row.agents.reduce(0) { $0 + $1.cacheCreationTokens }
-        let attributedCacheRead = row.agents.reduce(0) { $0 + $1.cacheReadTokens }
-        let other = AgentStat(
-            name: "other",
-            cost: max(0, row.cost - attributedCost),
-            totalTokens: max(0, row.totalTokens - attributedTotal),
-            inputTokens: max(0, row.inputTokens - attributedInput),
-            outputTokens: max(0, row.outputTokens - attributedOutput),
-            cacheCreationTokens: max(0, row.cacheCreationTokens - attributedCacheCreation),
-            cacheReadTokens: max(0, row.cacheReadTokens - attributedCacheRead),
-            models: row.agents.isEmpty ? row.models : []
-        )
-        let hasUsage = other.cost > 0.000_001 || other.totalTokens > 0 || other.inputTokens > 0 ||
-            other.outputTokens > 0 || other.cacheCreationTokens > 0 || other.cacheReadTokens > 0
-        return hasUsage ? other : nil
     }
 
     private var activeCodexWindows: [QuotaWindow] {
@@ -769,7 +893,9 @@ struct DashboardUsageView: View {
             let residualTokens = max(0, model.totalTokens - attributed.reduce(0) { $0 + $1.tokens })
             if residualCost > 0.000_001 || residualTokens > 0 {
                 rows.append(DashboardModelRow(
-                    provider: agentModels.isEmpty ? provider(for: model.name) : "other",
+                    provider: agentModels.isEmpty
+                        ? (AgentPalette.provider(forModel: model.name) ?? "other")
+                        : "other",
                     name: model.name,
                     cost: residualCost,
                     tokens: residualTokens
@@ -793,19 +919,6 @@ struct DashboardUsageView: View {
         let total = modelRows.reduce(0) { $0 + $1.cost }
         guard total > 0 else { return 0 }
         return model.cost / total
-    }
-
-    private func provider(for model: String) -> String {
-        let name = model.lowercased()
-        if name.hasPrefix("claude") { return "claude" }
-        if name.hasPrefix("gpt") || name.hasPrefix("o1") || name.hasPrefix("o3") { return "codex" }
-        return "other"
-    }
-
-    private func limitColor(_ percent: Double) -> Color {
-        if percent >= 95 { return Color(red: 0.80, green: 0.35, blue: 0.32) }
-        if percent >= 75 { return Color(red: 0.83, green: 0.55, blue: 0.25) }
-        return .accentColor
     }
 
     private func resetText(_ date: Date) -> String {

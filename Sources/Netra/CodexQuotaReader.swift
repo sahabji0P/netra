@@ -45,24 +45,31 @@ enum CodexQuotaReader {
               let rateLimits = findKey("rate_limits", in: object) as? [String: Any]
         else { return nil }
 
-        var windows: [QuotaWindow] = []
-        for key in ["primary", "secondary"] {
-            guard let window = rateLimits[key] as? [String: Any],
-                  let used = window["used_percent"] as? Double else { continue }
-            let minutes = window["window_minutes"] as? Int
-            let resets = (window["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
-            windows.append(QuotaWindow(
-                label: label(forMinutes: minutes), usedPercent: used, resetsAt: resets
-            ))
-        }
-        guard !windows.isEmpty else { return nil }
-
         var observedAt: Date?
         if let timestamp = object["timestamp"] as? String {
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             observedAt = iso.date(from: timestamp) ?? ISO8601DateFormatter().date(from: timestamp)
         }
+
+        var windows: [QuotaWindow] = []
+        for key in ["primary", "secondary"] {
+            guard let window = rateLimits[key] as? [String: Any],
+                  let used = window["used_percent"] as? Double else { continue }
+            let minutes = window["window_minutes"] as? Int
+            // Codex ≥ v0.48 writes `resets_at` (epoch seconds); older CLIs
+            // wrote `resets_in_seconds` relative to the line's timestamp.
+            var resets = (window["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
+            if resets == nil, let observedAt,
+               let inSeconds = window["resets_in_seconds"] as? Double {
+                resets = observedAt.addingTimeInterval(inSeconds)
+            }
+            windows.append(QuotaWindow(
+                label: label(forMinutes: minutes), usedPercent: used, resetsAt: resets
+            ))
+        }
+        guard !windows.isEmpty else { return nil }
+
         return CodexQuota(
             windows: windows,
             planType: rateLimits["plan_type"] as? String,

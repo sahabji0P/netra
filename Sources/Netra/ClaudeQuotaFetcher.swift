@@ -5,11 +5,51 @@ import Security
 /// endpoint using the token Claude Code keeps in the macOS Keychain. The
 /// token never leaves this process except to api.anthropic.com itself.
 struct ClaudeQuota: Codable, Sendable {
+    /// Where the numbers came from. Both are Anthropic-reported percentages;
+    /// they differ in freshness (a direct fetch is live, Claude Code's cache
+    /// is as old as its last server contact).
+    enum Source: String, Codable, Sendable {
+        case oauth
+        case claudeCodeCache
+    }
+
     var windows: [QuotaWindow]
     var subscriptionType: String?
     /// When this quota was actually fetched from Anthropic. Carried through
     /// fallbacks so the UI can say how old the number is instead of "live".
     var fetchedAt: Date
+    var source: Source
+
+    init(windows: [QuotaWindow], subscriptionType: String?, fetchedAt: Date,
+         source: Source = .oauth) {
+        self.windows = windows
+        self.subscriptionType = subscriptionType
+        self.fetchedAt = fetchedAt
+        self.source = source
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case windows, subscriptionType, fetchedAt, source
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        windows = try values.decode([QuotaWindow].self, forKey: .windows)
+        subscriptionType = try values.decodeIfPresent(String.self, forKey: .subscriptionType)
+        fetchedAt = try values.decode(Date.self, forKey: .fetchedAt)
+        source = try values.decodeIfPresent(Source.self, forKey: .source) ?? .oauth
+    }
+
+    /// Windows still inside their reported cycle. A window whose reset has
+    /// passed shows a percentage that no longer means anything; drop it. A
+    /// window without a reset stays usable only while the fetch is recent.
+    func activeWindows(now: Date = .now) -> [QuotaWindow] {
+        let undatedWindowFreshness: TimeInterval = 60 * 60
+        return windows.filter { window in
+            if let resetsAt = window.resetsAt { return resetsAt > now }
+            return now.timeIntervalSince(fetchedAt) <= undatedWindowFreshness
+        }
+    }
 }
 
 enum ClaudeQuotaError: Error {
@@ -60,7 +100,9 @@ enum ClaudeQuotaFetcher {
         return ClaudeQuota(windows: windows, subscriptionType: subscriptionType, fetchedAt: now)
     }
 
-    private static func parseDate(_ string: String) -> Date? {
+    /// Anthropic sends microsecond-precision ISO timestamps; shared with the
+    /// Claude Code cache reader, which sees the same format.
+    static func parseDate(_ string: String) -> Date? {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: string) ?? ISO8601DateFormatter().date(from: string)
