@@ -107,7 +107,7 @@ struct DashboardSettingsView: View {
     private var providerSettings: some View {
         DashboardPanel(
             title: "Providers",
-            detail: "The dashboard always shows everything"
+            detail: "What appears in the menu popover"
         ) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Choose which providers appear in the menu-bar popover. Hidden providers are removed from its totals, chart, and list — the dashboard keeps showing them.")
@@ -122,12 +122,37 @@ struct DashboardSettingsView: View {
                 } else {
                     ForEach(knownProviders, id: \.self) { provider in
                         providerVisibilityRow(provider)
-                        if provider != knownProviders.last {
-                            Divider().padding(.vertical, 4)
-                        }
+                        Divider().padding(.vertical, 4)
                     }
                 }
+                cursorProviderRow
             }
+        }
+    }
+
+    /// Cursor is a provider too, but it has no local usage data — so its row
+    /// is an opt-in that turns the Cursor account fetch on, rather than a
+    /// menu-visibility switch like the local providers above.
+    private var cursorProviderRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(AgentPalette.color(for: "cursor"))
+                .frame(width: 8, height: 8)
+                .padding(.top, 3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Cursor")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Cursor keeps no usage on local disk, so Netra reads the login Cursor already saved on this Mac and queries Cursor's own usage API (included, API, Auto, and Grok Bot windows). The login is sent only to cursor.com; this uses an undocumented endpoint that can change. Off means Netra reads nothing from Cursor.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Toggle("Cursor usage", isOn: $preferences.cursorUsageEnabled)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .padding(.top, 1)
         }
     }
 
@@ -173,7 +198,7 @@ struct DashboardSettingsView: View {
     }
 
     private var limitSettings: some View {
-        DashboardPanel(title: "Subscriptions", detail: "Where the plan-usage numbers come from") {
+        DashboardPanel(title: "Claude limits", detail: "Where Claude's numbers come from") {
             VStack(alignment: .leading, spacing: 12) {
                 settingsToggle(
                     "Live Claude limits",
@@ -186,12 +211,6 @@ struct DashboardSettingsView: View {
                 )
                 .font(.system(size: 10.5))
                 .foregroundStyle(.tertiary)
-                Divider()
-                settingsToggle(
-                    "Cursor usage",
-                    detail: "Cursor stores no usage data locally, so Netra reads your Cursor app login and queries Cursor's own usage API for your request quota. It uses the login Cursor already saved on this Mac and sends it only to Cursor. This relies on an undocumented endpoint that can change without notice.",
-                    isOn: $preferences.cursorUsageEnabled
-                )
             }
         }
     }
@@ -282,17 +301,25 @@ struct DashboardSettingsView: View {
 
     private var generalSettings: some View {
         DashboardPanel(title: "General") {
-            settingsToggle(
-                "Launch at login",
-                detail: LaunchAtLogin.isAvailable
-                    ? "Start Netra automatically after you sign in to this Mac."
-                    : "Available when Netra runs from its signed app bundle.",
-                isOn: $launchAtLogin
-            )
-            .disabled(!LaunchAtLogin.isAvailable)
-            .onChange(of: launchAtLogin) { _, enabled in
-                LaunchAtLogin.set(enabled)
-                launchAtLogin = LaunchAtLogin.isEnabled
+            VStack(alignment: .leading, spacing: 14) {
+                settingsToggle(
+                    "Launch at login",
+                    detail: LaunchAtLogin.isAvailable
+                        ? "Start Netra automatically after you sign in to this Mac."
+                        : "Available when Netra runs from its signed app bundle.",
+                    isOn: $launchAtLogin
+                )
+                .disabled(!LaunchAtLogin.isAvailable)
+                .onChange(of: launchAtLogin) { _, enabled in
+                    LaunchAtLogin.set(enabled)
+                    launchAtLogin = LaunchAtLogin.isEnabled
+                }
+                Divider()
+                settingsToggle(
+                    "Celebrate limit resets",
+                    detail: "Throw full-screen confetti the moment any subscription limit resets — 5-hour, weekly, or monthly — and fresh capacity is back. The overlay is click-through and never steals focus.",
+                    isOn: $preferences.confettiOnReset
+                )
             }
         }
     }

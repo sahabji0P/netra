@@ -46,6 +46,22 @@ final class RenderPreviewHarness: XCTestCase {
         let dashboard = DashboardUsageView(store: store)
             .frame(width: 1100, height: 1500)
         render(dashboard, name: "dashboard-usage", outputDir: outputDir)
+
+        // A representative full-screen confetti + banner frame, to eyeball the
+        // celebration look without waiting for a real reset.
+        let celebration = ZStack {
+            Color.black.opacity(0.15)
+            ConfettiOverlay(trigger: 1, pieceCount: 220, previewElapsed: 0.9)
+            VStack(spacing: 6) {
+                Text("🎉").font(.system(size: 44))
+                Text("Claude Code limit reset").font(.system(size: 20, weight: .semibold, design: .rounded))
+                Text("fresh capacity").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 28).padding(.vertical, 20)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        }
+        .frame(width: 900, height: 600)
+        render(celebration, name: "desktop-confetti", outputDir: outputDir)
         // DashboardSettingsView is not rendered here: its notification-status
         // polling calls UNUserNotificationCenter, which throws outside a real
         // app bundle. Verify Settings in the running app instead.

@@ -44,6 +44,7 @@ final class AppPreferences {
         static let hiddenMenuProviders = "preferences.popover.hiddenProviders"
         static let claudeQuotaEnabled = "preferences.limits.claudeQuotaEnabled"
         static let cursorUsageEnabled = "preferences.limits.cursorUsageEnabled"
+        static let confettiOnReset = "preferences.celebrate.confettiOnReset"
         static let dailyTokenAlertEnabled = "preferences.alerts.dailyTokens.enabled"
         static let dailyTokenAlertThreshold = "preferences.alerts.dailyTokens.threshold"
         static let providerLimitAlertEnabled = "preferences.alerts.providerLimit.enabled"
@@ -86,6 +87,11 @@ final class AppPreferences {
     /// endpoint that can change without notice.
     var cursorUsageEnabled: Bool {
         didSet { defaults.set(cursorUsageEnabled, forKey: Key.cursorUsageEnabled) }
+    }
+    /// Celebrate with a confetti burst in the popover when a weekly or monthly
+    /// subscription window resets — fresh capacity is worth a little moment.
+    var confettiOnReset: Bool {
+        didSet { defaults.set(confettiOnReset, forKey: Key.confettiOnReset) }
     }
 
     func isProviderVisibleInMenu(_ name: String) -> Bool {
@@ -131,6 +137,7 @@ final class AppPreferences {
         hiddenMenuProviders = Set(defaults.stringArray(forKey: Key.hiddenMenuProviders) ?? [])
         claudeQuotaEnabled = defaults.object(forKey: Key.claudeQuotaEnabled) as? Bool ?? false
         cursorUsageEnabled = defaults.object(forKey: Key.cursorUsageEnabled) as? Bool ?? false
+        confettiOnReset = defaults.object(forKey: Key.confettiOnReset) as? Bool ?? true
         dailyTokenAlertEnabled = defaults.object(forKey: Key.dailyTokenAlertEnabled) as? Bool ?? false
         dailyTokenAlertThreshold = max(defaults.object(forKey: Key.dailyTokenAlertThreshold) as? Int ?? 1_000_000, 1)
         providerLimitAlertEnabled = defaults.object(forKey: Key.providerLimitAlertEnabled) as? Bool ?? false

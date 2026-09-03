@@ -34,21 +34,28 @@ final class UsageStore {
 
     private(set) var snapshot: UsageSnapshot?
     private(set) var state: State = .empty
+    /// Invoked (on the main actor) the moment a limit reset is detected, so the
+    /// app can celebrate immediately — independent of whether the popover is
+    /// open. Set by the composition root; nil in tests.
+    var celebrationHandler: ((ResetCelebration) -> Void)?
 
     private let client = CCUsageClient()
     private let preferences: AppPreferences
     private let alerts: UsageAlertController
     private let cache = UsageSnapshotCache()
+    private let celebrations: ResetCelebrationStore
     private var refreshTask: Task<Void, Never>?
     private let staleAfter: TimeInterval = 60
 
     init(
         preferences: AppPreferences = AppPreferences(),
         alerts: UsageAlertController? = nil,
+        celebrations: ResetCelebrationStore = ResetCelebrationStore(),
         startsAutomatically: Bool = true
     ) {
         self.preferences = preferences
         self.alerts = alerts ?? UsageAlertController()
+        self.celebrations = celebrations
         guard startsAutomatically else { return }
         Task { [weak self] in
             guard let self else { return }
@@ -122,6 +129,7 @@ final class UsageStore {
                 snapshot = fresh
                 state = .fresh
                 await cache.save(fresh)
+                detectResetCelebration(in: fresh)
                 let alertConfiguration = preferences.alertConfiguration
                 Task {
                     await alerts.processFreshSnapshot(
@@ -137,6 +145,19 @@ final class UsageStore {
         refreshTask = task
         await task.value
         refreshTask = nil
+    }
+
+    /// Detects a limit reset and celebrates it immediately. Seeding is silent
+    /// (a window is never celebrated the first time it is seen), and each
+    /// rollover fires once thanks to the persisted acknowledged boundaries.
+    private func detectResetCelebration(in snapshot: UsageSnapshot) {
+        let (celebration, acknowledged) = ResetCelebrationDetector.evaluate(
+            windows: snapshot.celebratableWindows(),
+            acknowledged: celebrations.acknowledged()
+        )
+        celebrations.setAcknowledged(acknowledged)
+        guard let celebration else { return }
+        celebrationHandler?(celebration)
     }
 
     /// Called when the popover opens: refresh only if the data has gone stale.

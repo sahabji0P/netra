@@ -25,11 +25,21 @@ struct NetraApp: App {
     @State private var awake = AwakeController()
     @State private var updates = UpdateChecker()
     @State private var dashboardNavigation = DashboardNavigation()
+    @State private var desktopConfetti = DesktopConfetti()
 
     init() {
         let preferences = AppPreferences()
+        let confetti = DesktopConfetti()
+        let store = UsageStore(preferences: preferences)
+        // Fire full-screen confetti the moment a reset is detected, unless the
+        // user has turned it off.
+        store.celebrationHandler = { [weak preferences, weak confetti] celebration in
+            guard preferences?.confettiOnReset == true else { return }
+            confetti?.play(title: celebration.title)
+        }
         _preferences = State(initialValue: preferences)
-        _store = State(initialValue: UsageStore(preferences: preferences))
+        _store = State(initialValue: store)
+        _desktopConfetti = State(initialValue: confetti)
     }
 
     var body: some Scene {
