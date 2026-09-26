@@ -14,10 +14,61 @@ extension MenuView {
             ForEach(limitCards) { limits in
                 limitCard(limits)
             }
+            if let reason = missingClaudeLimitsReason {
+                missingClaudeCard(reason)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 14)
+    }
+
+    /// Why Claude has no limit card even though it was used this week, or nil
+    /// when a card is showing (or Claude is idle or hidden). Never let the
+    /// provider silently vanish.
+    var missingClaudeLimitsReason: String? {
+        guard let snapshot = store.snapshot,
+              preferences.isProviderVisibleInMenu("claude"),
+              !limitCards.contains(where: { $0.agent == "claude" }),
+              (snapshot.currentRow(for: .week).agentStat("claude")?.totalTokens ?? 0) > 0
+        else { return nil }
+        if preferences.claudeQuotaEnabled {
+            return "Couldn't get live limits from Anthropic. Make sure Claude Code is signed in with your Claude account."
+        }
+        if snapshot.claudeQuota != nil {
+            return "Claude Code's cached limits are out of date. They refresh the next time Claude Code checks your usage."
+        }
+        return "Claude Code hasn't cached your limits on this Mac — older versions and API-key sign-ins don't."
+    }
+
+    private func missingClaudeCard(_ reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(AgentPalette.color(for: "claude"))
+                    .frame(width: 8, height: 8)
+                Text(AgentPalette.shortName("claude"))
+                    .font(.system(size: 13, weight: .semibold))
+                Text("Limits unavailable")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1.5)
+                    .background(.quaternary.opacity(0.6), in: Capsule())
+            }
+            Text(reason)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !preferences.claudeQuotaEnabled {
+                Button("Use live limits from Anthropic") {
+                    preferences.claudeQuotaEnabled = true
+                    Task { await store.refresh() }
+                }
+                .controlSize(.small)
+                .help("Reads the sign-in Claude Code keeps in your Keychain (macOS asks once) and fetches your limits from api.anthropic.com.")
+            }
+        }
     }
 
     private func limitCard(_ limits: ProviderLimits) -> some View {

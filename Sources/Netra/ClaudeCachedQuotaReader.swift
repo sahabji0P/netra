@@ -7,11 +7,26 @@ import Foundation
 /// say how old the numbers are.
 enum ClaudeCachedQuotaReader {
     static func read(
-        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> ClaudeQuota? {
-        let url = homeDirectory.appendingPathComponent(".claude.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return quota(fromClaudeConfig: data)
+        configCandidates(homeDirectory: homeDirectory, environment: environment)
+            .compactMap { (try? Data(contentsOf: $0)).flatMap(quota(fromClaudeConfig:)) }
+            .max { $0.fetchedAt < $1.fetchedAt }
+    }
+
+    /// Where Claude Code keeps its config: `$CLAUDE_CONFIG_DIR/.claude.json`
+    /// when set, otherwise `~/.claude.json`, with `~/.claude/.claude.json`
+    /// used by some installs. The freshest cache among them wins.
+    static func configCandidates(homeDirectory: URL, environment: [String: String]) -> [URL] {
+        var candidates: [URL] = []
+        if let dir = environment["CLAUDE_CONFIG_DIR"], !dir.isEmpty {
+            candidates.append(URL(fileURLWithPath: (dir as NSString).expandingTildeInPath)
+                .appendingPathComponent(".claude.json"))
+        }
+        candidates.append(homeDirectory.appendingPathComponent(".claude.json"))
+        candidates.append(homeDirectory.appendingPathComponent(".claude/.claude.json"))
+        return candidates
     }
 
     /// Parses the (unofficial, schema-unstable) Claude Code config payload.

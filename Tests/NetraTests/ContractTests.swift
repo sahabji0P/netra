@@ -453,4 +453,22 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(codex.bankedResetCount, 3, "the server count wins when the list is shorter")
         XCTAssertEqual(LimitText.bankedResets(codex, now: now), "3 banked resets · next expires in 7d 18h")
     }
+
+    func testClaudeCachedReaderPicksFreshestConfigLocation() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("netra-claude-\(UUID().uuidString)")
+        let configDir = home.appendingPathComponent("custom-config")
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+        func config(fetchedAtMs: Int, percent: Int) -> Data {
+            Data(#"{"cachedUsageUtilization":{"fetchedAtMs":\#(fetchedAtMs),"utilization":{"limits":[{"kind":"weekly_all","percent":\#(percent),"resets_at":"2099-01-01T00:00:00Z"}]}}}"#.utf8)
+        }
+        try config(fetchedAtMs: 1_000, percent: 10).write(to: home.appendingPathComponent(".claude.json"))
+        try config(fetchedAtMs: 2_000, percent: 42).write(to: configDir.appendingPathComponent(".claude.json"))
+
+        let quota = try XCTUnwrap(ClaudeCachedQuotaReader.read(
+            homeDirectory: home, environment: ["CLAUDE_CONFIG_DIR": configDir.path]
+        ))
+        XCTAssertEqual(quota.windows.first?.usedPercent, 42, "the newer cache wins")
+        XCTAssertEqual(ClaudeCachedQuotaReader.read(homeDirectory: home, environment: [:])?.windows.first?.usedPercent, 10)
+    }
 }
