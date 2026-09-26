@@ -1,9 +1,10 @@
 import XCTest
 @testable import Netra
 
-/// Fixture tests for the three external contracts Netra depends on, all of
+/// Fixture tests for the external contracts Netra depends on, all of
 /// which can drift without notice: ccusage's JSON output (pinned 20.0.19),
-/// the Codex CLI rollout format, and Anthropic's OAuth usage endpoint.
+/// the Codex CLI rollout format, Anthropic's OAuth usage endpoint, and
+/// Cursor's undocumented dashboard usage API.
 final class ContractTests: XCTestCase {
     private func fixture(_ name: String) throws -> Data {
         let url = try XCTUnwrap(
@@ -277,6 +278,57 @@ final class ContractTests: XCTestCase {
             )
         )
         XCTAssertEqual(quota.windows.map(\.label), ["included usage", "API models", "auto models"])
+        XCTAssertTrue(quota.models.isEmpty)
+        XCTAssertEqual(quota.totalTokens, 0)
+        XCTAssertNil(quota.usageValueUSD)
+    }
+
+    func testCursorAggregatedUsageMapsTokensCostAndModels() throws {
+        let now = Date(timeIntervalSince1970: 1_756_000_000)
+        let quota = try XCTUnwrap(
+            CursorUsageFetcher.quota(
+                fromSummary: fixture("cursor-usage-summary.json"),
+                sandStatus: fixture("cursor-sand-usage.json"),
+                aggregations: fixture("cursor-aggregated-usage.json"),
+                fallbackPlan: nil, now: now
+            )
+        )
+        // totalCostCents is API-rate value drawn from the plan, not an invoice;
+        // actual extra billing is summary.onDemand.used (0 cents here).
+        XCTAssertEqual(try XCTUnwrap(quota.usageValueUSD), 13.30, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(quota.onDemandSpendUSD), 0, accuracy: 0.000_001)
+        XCTAssertEqual(quota.inputTokens, 170_000)
+        XCTAssertEqual(quota.outputTokens, 12_000)
+        XCTAssertEqual(quota.cacheCreationTokens, 15_000)
+        XCTAssertEqual(quota.cacheReadTokens, 110_000)
+        XCTAssertEqual(quota.totalTokens, 307_000)
+        XCTAssertEqual(quota.models.map(\.name), ["composer-2.5", "default"])
+        XCTAssertEqual(AgentPalette.modelDisplayName(quota.models[1].name), "Auto")
+        XCTAssertEqual(quota.models[0].cost, 12.504375, accuracy: 0.000_001)
+        // Live rows mostly omit cacheWriteTokens; missing means zero.
+        XCTAssertEqual(quota.models[0].cacheCreationTokens, 0)
+        XCTAssertEqual(quota.models[0].totalTokens, 218_000)
+        XCTAssertEqual(quota.models[1].totalTokens, 89_000)
+        XCTAssertEqual(quota.billingCycleStart, ISODate.parse("2026-08-13T10:05:25.000Z"))
+        XCTAssertTrue(quota.hasDisplayableData(now: now))
+    }
+
+    func testCursorAggregatedUsageTreatsZeroCentsAsUnreportedCost() throws {
+        let billed = try XCTUnwrap(
+            CursorUsageFetcher.billedUsage(fromAggregations: fixture("cursor-aggregated-usage-zero-cost.json"))
+        )
+        XCTAssertNil(billed.costUSD)
+        XCTAssertEqual(billed.models.count, 1)
+        XCTAssertEqual(billed.models[0].totalTokens, 2000)
+        XCTAssertEqual(billed.models[0].cost, 0, accuracy: 0.000_001)
+    }
+
+    func testCursorCycleRangeUsesBillingWindow() throws {
+        let range = try XCTUnwrap(
+            CursorUsageFetcher.cycleRange(fromSummary: fixture("cursor-usage-summary.json"))
+        )
+        XCTAssertGreaterThan(range.endMs, range.startMs)
+        XCTAssertEqual(range.startMs, 1_786_615_525_000)
     }
 
     func testCursorUsageSummaryFallsBackToPlanRatioWithoutPercentFields() throws {
@@ -323,5 +375,82 @@ final class ContractTests: XCTestCase {
     func testCodexRolloutIgnoresIrrelevantLines() {
         XCTAssertNil(CodexQuotaReader.quota(fromLine: #"{"type":"other"}"#))
         XCTAssertNil(CodexQuotaReader.quota(fromLine: "not json"))
+    }
+
+    // MARK: Codex app-server (live limits)
+
+    func testCodexAppServerRateLimitsMapWindowsPlanAndResetCredits() throws {
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: fixture("codex-app-server-rate-limits.json")) as? [String: Any]
+        )
+        let now = Date(timeIntervalSince1970: 1_790_410_000)
+        let quota = try XCTUnwrap(CodexLiveQuota.quota(fromRateLimits: object, now: now))
+        XCTAssertEqual(quota.source, .live)
+        XCTAssertEqual(quota.observedAt, now)
+        XCTAssertEqual(quota.planType, "team")
+        XCTAssertEqual(quota.resetCreditsAvailable, 3)
+        XCTAssertEqual(quota.windows.map(\.label), ["5h", "weekly"])
+        XCTAssertEqual(quota.windows.map(\.usedPercent), [12, 3])
+        XCTAssertEqual(quota.windows[1].durationSeconds, 10080 * 60)
+        XCTAssertEqual(quota.windows[1].resetsAt, Date(timeIntervalSince1970: 1_791_010_859))
+    }
+
+    func testCodexRolloutIgnoresOtherLimitBuckets() {
+        let premium = #"{"timestamp":"2026-09-05T11:59:05.150Z","payload":{"rate_limits":{"limit_id":"premium","primary":{"used_percent":99.0,"window_minutes":300,"resets_at":1790275862},"plan_type":"team","rate_limit_reached_type":"workspace_member_credits_depleted"}}}"#
+        XCTAssertNil(CodexQuotaReader.quota(fromLine: premium))
+        let codex = premium.replacingOccurrences(of: #""limit_id":"premium""#, with: #""limit_id":"codex""#)
+        let quota = CodexQuotaReader.quota(fromLine: codex)
+        XCTAssertEqual(quota?.source, .sessionLog)
+        XCTAssertEqual(quota?.limitReachedType, "workspace_member_credits_depleted")
+    }
+
+    // MARK: Claude live response with limits[] and extra usage
+
+    func testClaudeLiveUsageKeepsModelScopedWeeklyWindow() throws {
+        let quota = try ClaudeQuotaFetcher.quota(fromResponse: fixture("claude-usage-limits.json"), subscriptionType: "Max 5x")
+        XCTAssertEqual(quota.windows.map(\.label), ["5h", "weekly", "weekly · Fable"])
+        XCTAssertEqual(quota.windows.map(\.usedPercent), [36, 58, 71])
+        XCTAssertEqual(quota.windows[2].durationSeconds, 7 * 86400)
+        XCTAssertEqual(quota.extraUsage?.isEnabled, false)
+        XCTAssertEqual(quota.extraUsage?.summary, "Extra usage credits used up")
+    }
+
+    func testClaudeExtraUsageEnabledReadsMinorUnits() {
+        let usage = ClaudeExtraUsage.parse([
+            "is_enabled": true, "used_credits": 1250, "monthly_limit": 5000, "decimal_places": 2,
+        ])
+        XCTAssertEqual(usage?.usedUSD, 12.5)
+        XCTAssertEqual(usage?.monthlyLimitUSD, 50)
+        XCTAssertEqual(usage?.summary, "Extra usage on · $12.50 of $50.00 this month")
+        XCTAssertNil(ClaudeExtraUsage.parse(["is_enabled": false, "credits_ever_enabled": false])?.summary)
+    }
+
+    // MARK: Codex banked resets
+
+    func testCodexBankedResetsListAvailableCreditsSoonestFirst() throws {
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: fixture("codex-app-server-rate-limits.json")) as? [String: Any]
+        )
+        object["rateLimitResetCredits"] = [
+            "availableCount": 3,
+            "credits": [
+                ["id": "a", "status": "available", "grantedAt": 1_788_559_817, "expiresAt": 1_791_151_817, "title": "Full reset (Weekly + 5 hr)"],
+                ["id": "b", "status": "available", "grantedAt": 1_788_488_880, "expiresAt": 1_791_080_880, "title": "Full reset (Weekly + 5 hr)"],
+                ["id": "c", "status": "redeemed", "grantedAt": 1_788_000_000, "expiresAt": 1_791_000_000],
+                ["id": "d", "status": "available", "grantedAt": 1_788_000_000, "expiresAt": 1_790_000_000],
+            ],
+        ]
+        let now = Date(timeIntervalSince1970: 1_790_410_000)
+        let quota = try XCTUnwrap(CodexLiveQuota.quota(fromRateLimits: object, now: now))
+        XCTAssertEqual(quota.resetCredits?.count, 3, "redeemed credits are spent")
+        let snapshot = UsageSnapshot(fetchedAt: now, report: CCUnifiedReport(daily: [], weekly: [], monthly: []),
+                                     activeBlock: nil, codexQuota: quota, claudeQuota: nil)
+        let codex = try XCTUnwrap(snapshot.providerLimits(order: ["codex"], now: now).first)
+        // The expired credit ("d") drops out; soonest remaining expiry first.
+        XCTAssertEqual(codex.resetCredits.map(\.expiresAt), [
+            Date(timeIntervalSince1970: 1_791_080_880), Date(timeIntervalSince1970: 1_791_151_817),
+        ])
+        XCTAssertEqual(codex.bankedResetCount, 3, "the server count wins when the list is shorter")
+        XCTAssertEqual(LimitText.bankedResets(codex, now: now), "3 banked resets · next expires in 7d 18h")
     }
 }

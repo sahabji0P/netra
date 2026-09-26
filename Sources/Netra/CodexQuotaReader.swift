@@ -44,13 +44,11 @@ enum CodexQuotaReader {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rateLimits = findKey("rate_limits", in: object) as? [String: Any]
         else { return nil }
+        // Rollouts interleave snapshots for other limit buckets (e.g.
+        // "premium" credits); only the main "codex" bucket is the plan quota.
+        if let limitID = rateLimits["limit_id"] as? String, limitID != "codex" { return nil }
 
-        var observedAt: Date?
-        if let timestamp = object["timestamp"] as? String {
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            observedAt = iso.date(from: timestamp) ?? ISO8601DateFormatter().date(from: timestamp)
-        }
+        let observedAt = (object["timestamp"] as? String).flatMap(ISODate.parse)
 
         var windows: [QuotaWindow] = []
         for key in ["primary", "secondary"] {
@@ -65,7 +63,8 @@ enum CodexQuotaReader {
                 resets = observedAt.addingTimeInterval(inSeconds)
             }
             windows.append(QuotaWindow(
-                label: label(forMinutes: minutes), usedPercent: used, resetsAt: resets
+                label: label(forMinutes: minutes), usedPercent: used, resetsAt: resets,
+                durationSeconds: minutes.map { Double($0) * 60 }
             ))
         }
         guard !windows.isEmpty else { return nil }
@@ -73,11 +72,13 @@ enum CodexQuotaReader {
         return CodexQuota(
             windows: windows,
             planType: rateLimits["plan_type"] as? String,
-            observedAt: observedAt
+            observedAt: observedAt,
+            source: .sessionLog,
+            limitReachedType: rateLimits["rate_limit_reached_type"] as? String
         )
     }
 
-    private static func label(forMinutes minutes: Int?) -> String {
+    static func label(forMinutes minutes: Int?) -> String {
         guard let minutes else { return "limit" }
         switch minutes {
         case ..<1500: return "\(Int((Double(minutes) / 60).rounded()))h"
@@ -98,5 +99,146 @@ enum CodexQuotaReader {
             }
         }
         return nil
+    }
+}
+
+/// Live Codex limits from the Codex CLI's own app server
+/// (`codex app-server`, JSON-RPC over stdio, `account/rateLimits/read`). The
+/// CLI handles its login and asks OpenAI directly, so this is current even
+/// when no Codex session ran recently — session logs only reflect the last
+/// turn, and go stale across resets (including redeemed reset credits).
+enum CodexLiveQuota {
+    static let timeout: TimeInterval = 12
+
+    /// Blocking; call off the main actor. Nil when Codex is not installed,
+    /// not logged in, or the server does not answer in time.
+    static func fetch(now: Date = .now) -> CodexQuota? {
+        guard let binary = resolveBinary() else { return nil }
+        let process = Process()
+        process.executableURL = binary
+        process.arguments = ["app-server"]
+        var environment = ProcessInfo.processInfo.environment
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        environment["PATH"] = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
+                               environment["PATH"] ?? ""].joined(separator: ":")
+        process.environment = environment
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+
+        let reader = LineCollector()
+        let answered = DispatchSemaphore(value: 0)
+        output.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+                answered.signal()
+            } else if reader.append(chunk, untilResponseID: 2) {
+                answered.signal()
+            }
+        }
+        do { try process.run() } catch { return nil }
+        defer {
+            output.fileHandleForReading.readabilityHandler = nil
+            if process.isRunning { process.terminate() }
+        }
+
+        let requests: [[String: Any]] = [
+            ["jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": ["clientInfo": ["name": "netra", "version": "1"]]],
+            ["jsonrpc": "2.0", "method": "initialized"],
+            ["jsonrpc": "2.0", "id": 2, "method": "account/rateLimits/read"],
+        ]
+        for request in requests {
+            guard var line = try? JSONSerialization.data(withJSONObject: request) else { return nil }
+            line.append(0x0A)
+            try? input.fileHandleForWriting.write(contentsOf: line)
+        }
+        guard answered.wait(timeout: .now() + timeout) == .success,
+              let result = reader.response(id: 2)?["result"] as? [String: Any]
+        else { return nil }
+        return quota(fromRateLimits: result, now: now)
+    }
+
+    /// Maps an `account/rateLimits/read` result. Split out for fixtures.
+    static func quota(fromRateLimits result: [String: Any], now: Date = .now) -> CodexQuota? {
+        let byID = result["rateLimitsByLimitId"] as? [String: Any]
+        guard let limits = (byID?["codex"] as? [String: Any]) ?? (result["rateLimits"] as? [String: Any])
+        else { return nil }
+        var windows: [QuotaWindow] = []
+        for key in ["primary", "secondary"] {
+            guard let window = limits[key] as? [String: Any],
+                  let used = (window["usedPercent"] as? NSNumber)?.doubleValue else { continue }
+            let minutes = (window["windowDurationMins"] as? NSNumber)?.intValue
+            windows.append(QuotaWindow(
+                label: CodexQuotaReader.label(forMinutes: minutes),
+                usedPercent: used,
+                resetsAt: (window["resetsAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) },
+                durationSeconds: minutes.map { Double($0) * 60 }
+            ))
+        }
+        guard !windows.isEmpty else { return nil }
+        let credits = result["rateLimitResetCredits"] as? [String: Any]
+        let banked = (credits?["credits"] as? [[String: Any]])?.compactMap { credit -> LimitResetCredit? in
+            // Only redeemable credits count; redeemed/redeeming ones are spent.
+            if let status = credit["status"] as? String, status != "available" { return nil }
+            return LimitResetCredit(
+                title: JSONValue.string(credit["title"]),
+                grantedAt: JSONValue.number(credit["grantedAt"]).map { Date(timeIntervalSince1970: $0) },
+                expiresAt: JSONValue.number(credit["expiresAt"]).map { Date(timeIntervalSince1970: $0) }
+            )
+        }
+        return CodexQuota(
+            windows: windows,
+            planType: limits["planType"] as? String,
+            observedAt: now,
+            source: .live,
+            limitReachedType: limits["rateLimitReachedType"] as? String,
+            resetCreditsAvailable: (credits?["availableCount"] as? NSNumber)?.intValue,
+            resetCredits: banked
+        )
+    }
+
+    private static func resolveBinary() -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let candidates = [
+            ProcessInfo.processInfo.environment["NETRA_CODEX"],
+            "\(home)/.local/bin/codex",
+            "\(home)/.codex/packages/standalone/current/bin/codex",
+            "/opt/homebrew/bin/codex",
+            "/usr/local/bin/codex",
+            // ChatGPT.app bundles the Codex CLI.
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        ].compactMap { $0 }
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+            .map { URL(fileURLWithPath: $0) }
+    }
+}
+
+/// Accumulates newline-delimited JSON-RPC output from the app server.
+private final class LineCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private var responses: [Int: [String: Any]] = [:]
+
+    /// Returns true once the response with `id` has arrived.
+    func append(_ chunk: Data, untilResponseID id: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        buffer.append(chunk)
+        while let newline = buffer.firstIndex(of: 0x0A) {
+            let line = buffer[buffer.startIndex..<newline]
+            buffer.removeSubrange(buffer.startIndex...newline)
+            if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+               let responseID = (object["id"] as? NSNumber)?.intValue {
+                responses[responseID] = object
+            }
+        }
+        return responses[id] != nil
+    }
+
+    func response(id: Int) -> [String: Any]? {
+        lock.lock(); defer { lock.unlock() }
+        return responses[id]
     }
 }

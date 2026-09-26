@@ -1,0 +1,29 @@
+{
+  "ordinaryUsageAllowed": true,
+  "rateLimits": {
+    "limitId": "codex",
+    "primary": { "usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1790424059 },
+    "secondary": { "usedPercent": 3, "windowDurationMins": 10080, "resetsAt": 1791010859 },
+    "credits": { "hasCredits": false, "unlimited": false, "balance": null },
+    "spendControlReached": false,
+    "planType": "team",
+    "rateLimitReachedType": null
+  },
+  "rateLimitsByLimitId": {
+    "codex": {
+      "limitId": "codex",
+      "primary": { "usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1790424059 },
+      "secondary": { "usedPercent": 3, "windowDurationMins": 10080, "resetsAt": 1791010859 },
+      "planType": "team",
+      "rateLimitReachedType": null
+    }
+  },
+  "rateLimitResetCredits": {
+    "availableCount": 3,
+    "credits": [
+      { "id": "RateLimitResetCredit_synthetic", "resetType": "codexRateLimits", "status": "available",
+        "grantedAt": 1788488880, "expiresAt": 1791080880, "title": "Full reset (Weekly + 5 hr)" }
+    ]
+  },
+  "accountId": "00000000-0000-0000-0000-000000000000"
+}
