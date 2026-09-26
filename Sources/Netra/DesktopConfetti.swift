@@ -68,7 +68,7 @@ private struct DesktopConfettiView: View {
 
     var body: some View {
         ZStack {
-            ConfettiOverlay(trigger: trigger, pieceCount: 220)
+            ConfettiOverlay(trigger: trigger)
             if let title, showBanner {
                 VStack(spacing: 6) {
                     Text("🎉")

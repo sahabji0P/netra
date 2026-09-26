@@ -15,7 +15,7 @@ struct ConfettiOverlay: View {
     @State private var start: Date?
     @State private var pieces: [Piece] = []
 
-    init(trigger: Int, pieceCount: Int = 52, previewElapsed: Double? = nil) {
+    init(trigger: Int, pieceCount: Int = 220, previewElapsed: Double? = nil) {
         self.trigger = trigger
         self.pieceCount = pieceCount
         self.previewElapsed = previewElapsed

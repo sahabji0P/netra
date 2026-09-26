@@ -25,14 +25,6 @@ final class AwakeController {
 
     var isAwake: Bool { mode != .off }
 
-    var statusText: String {
-        switch mode {
-        case .off: "Mac sleeps normally"
-        case .indefinite: "Blocking idle sleep until turned off"
-        case .until(let date): "Blocking idle sleep until \(date.formatted(date: .omitted, time: .shortened))"
-        }
-    }
-
     func setAwake(_ on: Bool) {
         on ? hold(.indefinite) : release()
     }
