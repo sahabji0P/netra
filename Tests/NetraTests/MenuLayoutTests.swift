@@ -31,7 +31,9 @@ final class MenuLayoutTests: XCTestCase {
         let size = hostingView.fittingSize
 
         XCTAssertEqual(size.width, MenuView.width, accuracy: 1)
-        XCTAssertGreaterThan(size.height, 300)
+        // The popover takes its content's natural height (no forced minimum,
+        // which left blank space below short content); it must not collapse.
+        XCTAssertGreaterThan(size.height, 100)
         XCTAssertLessThanOrEqual(size.height, NSScreen.main?.visibleFrame.height ?? 900)
     }
 }

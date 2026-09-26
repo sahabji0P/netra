@@ -20,9 +20,6 @@ struct MenuView: View {
     // Internal so the limit cards (LimitsViews.swift) can drive the panel.
     @State var panelTarget: UsagePanelTarget?
     @State var panelHoverTask: Task<Void, Never>?
-    /// Starts tall so the first measurement shrinks the panel once instead
-    /// of growing it after it appears.
-    @State private var contentHeight: CGFloat = 760
     @State private var appliedDefaultPeriod = false
 
     static let width: CGFloat = 360
@@ -78,7 +75,7 @@ struct MenuView: View {
     }
 
     private var showsLimitCards: Bool {
-        preferences.showsLimits && !limitCards.isEmpty
+        preferences.showsLimits && (!limitCards.isEmpty || missingClaudeLimitsReason != nil)
     }
 
     /// The row the provider list describes: a hovered chart bar wins over
@@ -144,21 +141,21 @@ struct MenuView: View {
         }
     }
 
+    /// Static sizing: the popover takes its content's natural height when
+    /// that fits the screen, and only scrolls when it does not. (Measuring
+    /// the content and feeding the height back into the frame left the
+    /// window stuck at its initial height on some Macs.)
     private var scrollingBody: some View {
-        ScrollView(.vertical) {
+        ViewThatFits(in: .vertical) {
             menuContent
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: MenuContentHeightKey.self, value: geometry.size.height)
-                    }
-                }
+            ScrollView(.vertical) {
+                menuContent
+            }
+            .scrollIndicators(.hidden)
+            .frame(height: maximumPopoverHeight)
         }
-        .scrollIndicators(.hidden)
-        .scrollBounceBehavior(.basedOnSize)
-        .onPreferenceChange(MenuContentHeightKey.self) { height in
-            if height > 0 { contentHeight = height }
-        }
-        .frame(width: Self.width, height: min(contentHeight, maximumPopoverHeight))
+        .frame(width: Self.width)
+        .frame(maxHeight: maximumPopoverHeight)
         .onAppear {
             // Netra is a menu-bar-only app, so it is not active when the
             // popover opens, and SwiftUI does not deliver hover to an
@@ -616,12 +613,5 @@ struct MenuView: View {
         @unknown default:
             break
         }
-    }
-}
-
-private struct MenuContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
