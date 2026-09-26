@@ -24,54 +24,67 @@ enum ClaudeCachedQuotaReader {
         let fetchedAt = (cached["fetchedAtMs"] as? NSNumber)
             .map { Date(timeIntervalSince1970: $0.doubleValue / 1000) } ?? .now
 
-        var windows = limitWindows(utilization["limits"] as? [[String: Any]] ?? [])
-        if windows.isEmpty {
-            // Older Claude Code versions may lack `limits[]`; fall back to the
-            // top-level window objects.
-            func addWindow(key: String, label: String) {
-                guard let window = utilization[key] as? [String: Any],
-                      let percent = window["utilization"] as? NSNumber else { return }
-                let resets = (window["resets_at"] as? String)
-                    .flatMap(ClaudeQuotaFetcher.parseDate)
-                windows.append(QuotaWindow(
-                    label: label, usedPercent: percent.doubleValue, resetsAt: resets
-                ))
-            }
-            addWindow(key: "five_hour", label: "5h")
-            addWindow(key: "seven_day", label: "weekly")
-            addWindow(key: "seven_day_opus", label: "weekly · Opus")
-            addWindow(key: "seven_day_sonnet", label: "weekly · Sonnet")
-        }
+        let windows = windows(from: utilization)
         guard !windows.isEmpty else { return nil }
 
         return ClaudeQuota(
             windows: windows,
             subscriptionType: planLabel(from: object),
             fetchedAt: fetchedAt,
-            source: .claudeCodeCache
+            source: .claudeCodeCache,
+            extraUsage: ClaudeExtraUsage.parse(utilization["extra_usage"])
         )
     }
 
     /// `limits[]` is richer than the fixed window keys: it carries the live
     /// model-scoped weekly bucket (which the fixed keys report as null).
+    /// Windows from an Anthropic usage payload — Claude Code's cached copy
+    /// and the live OAuth response share this shape. `limits[]` carries
+    /// model-scoped weekly windows (e.g. "weekly · Fable") the fixed keys
+    /// report as null, but it can also be partial (captured responses list
+    /// only the session). Merge: limits first, then fixed keys it lacks.
+    static func windows(from payload: [String: Any]) -> [QuotaWindow] {
+        var windows = limitWindows(payload["limits"] as? [[String: Any]] ?? [])
+        let fixed: [(key: String, label: String, duration: Double)] = [
+            ("five_hour", "5h", 5 * 3600),
+            ("seven_day", "weekly", 7 * 86400),
+            ("seven_day_opus", "weekly · Opus", 7 * 86400),
+            ("seven_day_sonnet", "weekly · Sonnet", 7 * 86400),
+        ]
+        for window in fixed where !windows.contains(where: { $0.label == window.label }) {
+            guard let object = payload[window.key] as? [String: Any],
+                  let percent = JSONValue.number(object["utilization"]) else { continue }
+            windows.append(QuotaWindow(
+                label: window.label, usedPercent: percent,
+                resetsAt: (object["resets_at"] as? String).flatMap(ISODate.parse),
+                durationSeconds: window.duration
+            ))
+        }
+        return windows
+    }
+
     private static func limitWindows(_ limits: [[String: Any]]) -> [QuotaWindow] {
         limits.compactMap { limit in
             guard let percent = limit["percent"] as? NSNumber,
                   let kind = limit["kind"] as? String else { return nil }
             let label: String
+            var duration: Double?
             switch kind {
-            case "session": label = "5h"
-            case "weekly_all": label = "weekly"
+            case "session": label = "5h"; duration = 5 * 3600
+            case "weekly_all": label = "weekly"; duration = 7 * 86400
             case "weekly_scoped":
                 let scope = limit["scope"] as? [String: Any]
                 let model = scope?["model"] as? [String: Any]
                 let name = model?["display_name"] as? String
                 label = name.map { "weekly · \($0)" } ?? "weekly · model"
+                duration = 7 * 86400
             default: label = kind.replacingOccurrences(of: "_", with: " ")
             }
             let resets = (limit["resets_at"] as? String)
-                .flatMap(ClaudeQuotaFetcher.parseDate)
-            return QuotaWindow(label: label, usedPercent: percent.doubleValue, resetsAt: resets)
+                .flatMap(ISODate.parse)
+            return QuotaWindow(
+                label: label, usedPercent: percent.doubleValue, resetsAt: resets, durationSeconds: duration
+            )
         }
     }
 

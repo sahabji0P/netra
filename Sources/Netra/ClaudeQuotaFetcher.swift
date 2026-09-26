@@ -19,17 +19,20 @@ struct ClaudeQuota: Codable, Sendable {
     /// fallbacks so the UI can say how old the number is instead of "live".
     var fetchedAt: Date
     var source: Source
+    /// Pay-as-you-go credits that cover you past the plan limits.
+    var extraUsage: ClaudeExtraUsage?
 
     init(windows: [QuotaWindow], subscriptionType: String?, fetchedAt: Date,
-         source: Source = .oauth) {
+         source: Source = .oauth, extraUsage: ClaudeExtraUsage? = nil) {
         self.windows = windows
         self.subscriptionType = subscriptionType
         self.fetchedAt = fetchedAt
         self.source = source
+        self.extraUsage = extraUsage
     }
 
     private enum CodingKeys: String, CodingKey {
-        case windows, subscriptionType, fetchedAt, source
+        case windows, subscriptionType, fetchedAt, source, extraUsage
     }
 
     init(from decoder: Decoder) throws {
@@ -38,6 +41,7 @@ struct ClaudeQuota: Codable, Sendable {
         subscriptionType = try values.decodeIfPresent(String.self, forKey: .subscriptionType)
         fetchedAt = try values.decode(Date.self, forKey: .fetchedAt)
         source = try values.decodeIfPresent(Source.self, forKey: .source) ?? .oauth
+        extraUsage = try values.decodeIfPresent(ClaudeExtraUsage.self, forKey: .extraUsage)
     }
 
     /// Windows still inside their reported cycle. A window whose reset has
@@ -49,6 +53,40 @@ struct ClaudeQuota: Codable, Sendable {
             if let resetsAt = window.resetsAt { return resetsAt > now }
             return now.timeIntervalSince(fetchedAt) <= undatedWindowFreshness
         }
+    }
+}
+
+/// Anthropic's `extra_usage` block: credits that keep you working after a
+/// plan limit. Amounts are in minor units (`decimal_places`, cents for USD).
+struct ClaudeExtraUsage: Codable, Hashable, Sendable {
+    var isEnabled: Bool
+    var usedUSD: Double?
+    var monthlyLimitUSD: Double?
+    /// e.g. "out_of_credits".
+    var disabledReason: String?
+    var everEnabled: Bool
+
+    static func parse(_ object: Any?) -> ClaudeExtraUsage? {
+        guard let object = object as? [String: Any], let enabled = object["is_enabled"] as? Bool else { return nil }
+        let scale = pow(10, JSONValue.number(object["decimal_places"]) ?? 2)
+        return ClaudeExtraUsage(
+            isEnabled: enabled,
+            usedUSD: JSONValue.number(object["used_credits"]).map { $0 / scale },
+            monthlyLimitUSD: JSONValue.number(object["monthly_limit"]).map { $0 / scale },
+            disabledReason: JSONValue.string(object["disabled_reason"]),
+            everEnabled: object["credits_ever_enabled"] as? Bool ?? enabled
+        )
+    }
+
+    /// One line for the limit card, or nil when there is nothing to say.
+    var summary: String? {
+        if isEnabled {
+            let used = usedUSD.map(Format.cost) ?? "$0.00"
+            return monthlyLimitUSD.map { "Extra usage on · \(used) of \(Format.cost($0)) this month" }
+                ?? "Extra usage on · \(used) used this month"
+        }
+        guard everEnabled else { return nil }
+        return disabledReason == "out_of_credits" ? "Extra usage credits used up" : "Extra usage off"
     }
 }
 
@@ -84,28 +122,13 @@ enum ClaudeQuotaFetcher {
             throw ClaudeQuotaError.decoding
         }
 
-        var windows: [QuotaWindow] = []
-        func addWindow(key: String, label: String) {
-            guard let window = object[key] as? [String: Any],
-                  let utilization = window["utilization"] as? Double else { return }
-            let resets = (window["resets_at"] as? String).flatMap(parseDate)
-            windows.append(QuotaWindow(label: label, usedPercent: utilization, resetsAt: resets))
-        }
-        addWindow(key: "five_hour", label: "5h")
-        addWindow(key: "seven_day", label: "weekly")
-        addWindow(key: "seven_day_opus", label: "weekly · Opus")
-        addWindow(key: "seven_day_sonnet", label: "weekly · Sonnet")
+        let windows = ClaudeCachedQuotaReader.windows(from: object)
 
         guard !windows.isEmpty else { throw ClaudeQuotaError.decoding }
-        return ClaudeQuota(windows: windows, subscriptionType: subscriptionType, fetchedAt: now)
-    }
-
-    /// Anthropic sends microsecond-precision ISO timestamps; shared with the
-    /// Claude Code cache reader, which sees the same format.
-    static func parseDate(_ string: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: string) ?? ISO8601DateFormatter().date(from: string)
+        return ClaudeQuota(
+            windows: windows, subscriptionType: subscriptionType, fetchedAt: now,
+            extraUsage: ClaudeExtraUsage.parse(object["extra_usage"])
+        )
     }
 
     struct Credentials {
