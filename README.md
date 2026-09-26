@@ -59,6 +59,12 @@ dot while Keep Awake is on — which popover sections show, and the period the
 popover opens on.
 
 **Claude** and **Codex** limits appear whenever a limit source is available.
+If Claude was used this week but no limit source is available (Claude Code
+hasn't cached limits on that Mac — older versions and API-key sign-ins don't
+— or its cache is stale), the popover shows a Claude card saying why, with a
+one-click **Use live limits from Anthropic** button. Netra looks for Claude
+Code's cache in `$CLAUDE_CONFIG_DIR/.claude.json`, `~/.claude.json`, and
+`~/.claude/.claude.json`, using the freshest.
 Codex limits are live: Netra asks the Codex CLI's own app server
 (`codex app-server`, `account/rateLimits/read`) — the CLI handles its login
 and asks OpenAI directly, so the numbers are current even when no Codex
