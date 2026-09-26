@@ -23,6 +23,8 @@ struct ResetWindow: Equatable {
 /// 5-hour ones — but never the labelled local block estimate, which is not a
 /// provider-reported reset (it is `activeBlock`, not a `QuotaWindow`).
 struct ResetCelebrationDetector {
+    static let sameWindowTolerance: TimeInterval = 120
+
     /// Given the windows now observed and the boundaries previously
     /// acknowledged, returns the celebration (if any) plus the boundaries to
     /// persist. A window celebrates when its acknowledged boundary both differs
@@ -43,9 +45,18 @@ struct ResetCelebrationDetector {
                 if let prior = acknowledged[window.key] { updated[window.key] = prior }
                 continue
             }
+            guard let prior = acknowledged[window.key] else { // first sight
+                updated[window.key] = resetsAt
+                continue
+            }
+            // Reads of one window jitter by up to a second or so; only a
+            // boundary that really moved is a new cycle.
+            if abs(resetsAt.timeIntervalSince(prior)) < Self.sameWindowTolerance {
+                updated[window.key] = prior
+                continue
+            }
             updated[window.key] = resetsAt
-            guard let prior = acknowledged[window.key] else { continue } // first sight
-            if prior != resetsAt && now >= prior {
+            if now >= prior {
                 resetProviders.insert(window.provider)
             }
         }
@@ -84,8 +95,9 @@ struct ResetCelebrationStore {
 }
 
 extension UsageSnapshot {
-    /// The meaningful subscription windows across every provider, tagged for
-    /// reset detection. Excludes short-cadence windows (the Claude 5h block).
+    /// Every provider-reported window (5-hour ones included), tagged for reset
+    /// detection. The local Claude block estimate is not a `QuotaWindow`, so
+    /// it never celebrates.
     func celebratableWindows() -> [ResetWindow] {
         var windows: [ResetWindow] = []
         // Raw windows, not activeWindows(): a window must stay observable

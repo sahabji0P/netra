@@ -25,7 +25,7 @@ final class AppPreferencesTests: XCTestCase {
         XCTAssertFalse(preferences.providerLimitAlertEnabled)
         XCTAssertEqual(preferences.providerLimitAlertThreshold, 80)
         XCTAssertEqual(MenuBarDisplayMode.highestProviderLimit.title, "Highest usage indicator")
-        XCTAssertEqual(MenuBarDisplayMode.highestProviderLimit.detail, "Provider limit or local estimate")
+        XCTAssertEqual(MenuBarDisplayMode.highestProviderLimit.detail, "Percent used of the provider closest to its limit")
     }
 
     func testChangesPersistAcrossInstances() {
@@ -141,10 +141,8 @@ final class UsageAlertEvaluatorTests: XCTestCase {
                 startTime: isoString(now.addingTimeInterval(-600)),
                 endTime: isoString(reset), isActive: true, isGap: false,
                 totalTokens: 10_000, costUSD: 1,
-                projection: CCBlockProjection(remainingMinutes: 60, totalCost: 3, totalTokens: 30_000),
-                tokenLimitStatus: CCTokenLimitStatus(
-                    limit: 11_111, percentUsed: 90, projectedUsage: 30_000, status: "warning"
-                )
+                projection: CCBlockProjection(totalCost: 3),
+                tokenLimitStatus: CCTokenLimitStatus(limit: 11_111)
             )),
             codexQuota: CodexQuota(
                 windows: [QuotaWindow(label: "5h", usedPercent: 85, resetsAt: reset)],

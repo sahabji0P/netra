@@ -114,7 +114,7 @@ final class ProviderVisibilityTests: XCTestCase {
             endTime: iso.string(from: now.addingTimeInterval(3600)),
             isActive: true, isGap: nil, totalTokens: 100, costUSD: 1,
             projection: nil,
-            tokenLimitStatus: CCTokenLimitStatus(limit: 100, percentUsed: 99, projectedUsage: 100, status: "warning")
+            tokenLimitStatus: CCTokenLimitStatus(limit: 100)
         )
         let quota = ClaudeQuota(
             windows: [QuotaWindow(label: "weekly", usedPercent: 91, resetsAt: now.addingTimeInterval(86_400))],

@@ -73,43 +73,15 @@ enum UsageAlertEvaluator {
 
         if configuration.providerLimitAlertEnabled {
             let threshold = min(max(configuration.providerLimitThreshold, 1), 100)
-            if let quota = snapshot.codexQuota {
-                // Without a reset timestamp there is no trustworthy cycle key,
-                // so keep the recent value visible in the UI but do not emit a
-                // potentially repeating provider-limit notification for it.
-                for window in quota.activeWindows(now: now) where
-                    window.resetsAt != nil && window.usedPercent >= threshold {
+            // Every provider-reported window alerts the same way. Windows
+            // without a reset have no trustworthy cycle key, so they never
+            // alert (they could repeat); the local estimate is handled below.
+            let reported = snapshot.providerLimits(order: AppPreferences.limitProviders, now: now)
+                .filter { !$0.isEstimate }
+            for limits in reported {
+                for window in limits.windows where window.resetsAt != nil && window.usedPercent >= threshold {
                     active.append(providerCandidate(
-                        provider: "Codex",
-                        window: window.label,
-                        usedPercent: window.usedPercent,
-                        threshold: threshold,
-                        cycle: cycleIdentifier(window.resetsAt)
-                    ))
-                }
-            }
-
-            // Cursor's provider-reported usage alerts like Codex.
-            if let cursor = snapshot.cursorQuota {
-                for window in cursor.activeWindows(now: now) where
-                    window.resetsAt != nil && window.usedPercent >= threshold {
-                    active.append(providerCandidate(
-                        provider: "Cursor",
-                        window: window.label,
-                        usedPercent: window.usedPercent,
-                        threshold: threshold,
-                        cycle: cycleIdentifier(window.resetsAt)
-                    ))
-                }
-            }
-
-            // Real Claude limits (opt-in OAuth fetch) alert like any other
-            // provider-reported quota; windows without a reset never alert.
-            if let claude = snapshot.claudeQuota {
-                for window in claude.activeWindows(now: now) where
-                    window.resetsAt != nil && window.usedPercent >= threshold {
-                    active.append(providerCandidate(
-                        provider: "Claude",
+                        provider: AgentPalette.shortName(limits.agent),
                         window: window.label,
                         usedPercent: window.usedPercent,
                         threshold: threshold,
@@ -158,13 +130,15 @@ enum UsageAlertEvaluator {
     }
 
     private static func dayIdentifier(for date: Date, calendar: Calendar) -> String {
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+        PeriodKeys.day(date, calendar)
     }
 
-    private static func cycleIdentifier(_ date: Date?) -> String {
+    /// Providers report the same reset with sub-second-to-second jitter
+    /// between reads; key the cycle to the nearest 10 minutes so one window
+    /// never alerts twice.
+    static func cycleIdentifier(_ date: Date?) -> String {
         guard let date else { return "unknown-cycle" }
-        return String(Int(date.timeIntervalSince1970.rounded()))
+        return String(Int((date.timeIntervalSince1970 / 600).rounded()) * 600)
     }
 
     private static func roundedPercent(_ value: Double) -> String {

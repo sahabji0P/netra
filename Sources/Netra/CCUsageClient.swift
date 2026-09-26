@@ -59,9 +59,7 @@ actor CCUsageClient {
 
     private func sinceArgument(daysBack: Int) -> String {
         let since = Calendar.current.date(byAdding: .day, value: -daysBack, to: .now) ?? .now
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        return formatter.string(from: since)
+        return PeriodKeys.formatter("yyyyMMdd").string(from: since)
     }
 
     private func runJSON(_ arguments: [String]) async throws -> Data {
