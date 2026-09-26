@@ -1,0 +1,53 @@
+{
+  "totalUsageEventsCount": 4,
+  "usageEventsDisplay": [
+    {
+      "chargedCents": 4.75,
+      "conversationId": "conv-synthetic-1",
+      "isChargeable": true,
+      "isTokenBasedCall": true,
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_PRO",
+      "model": "composer-2.5",
+      "requestsCosts": 1.2,
+      "serviceAccountId": "null",
+      "timestamp": "1790330400000",
+      "tokenUsage": {
+        "cacheReadTokens": 40,
+        "cacheWriteTokens": 10,
+        "inputTokens": 100,
+        "outputTokens": 20,
+        "totalCents": 4.75
+      },
+      "usageBasedCosts": "-"
+    },
+    {
+      "conversationId": "conv-synthetic-1",
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_PRO",
+      "model": "default",
+      "timestamp": "1790326800000",
+      "tokenUsage": {
+        "cacheReadTokens": 1000,
+        "inputTokens": "200",
+        "outputTokens": 30,
+        "totalCents": 1.25
+      }
+    },
+    {
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_PRO",
+      "model": "claude-4.5-sonnet",
+      "isTokenBasedCall": false,
+      "requestsCosts": 1,
+      "timestamp": "1790323200000"
+    },
+    {
+      "kind": "USAGE_EVENT_KIND_INCLUDED_IN_PRO",
+      "model": "grok-bot-automation",
+      "timestamp": "1790240400000",
+      "tokenUsage": {
+        "inputTokens": 10,
+        "outputTokens": 2,
+        "totalCents": 0.5
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "aggregations": [
+    {
+      "modelIntent": "composer-2.5",
+      "inputTokens": "1000",
+      "outputTokens": "200",
+      "cacheWriteTokens": "0",
+      "cacheReadTokens": "800",
+      "totalCents": 0
+    }
+  ],
+  "totalInputTokens": "1000",
+  "totalOutputTokens": "200",
+  "totalCacheWriteTokens": "0",
+  "totalCacheReadTokens": "800",
+  "totalCostCents": 0
+}

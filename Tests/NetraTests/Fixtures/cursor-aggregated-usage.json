@@ -1,0 +1,26 @@
+{
+  "aggregations": [
+    {
+      "cacheReadTokens": "90000",
+      "inputTokens": "120000",
+      "modelIntent": "composer-2.5",
+      "outputTokens": "8000",
+      "tier": 2,
+      "totalCents": 1250.4375
+    },
+    {
+      "cacheReadTokens": "20000",
+      "cacheWriteTokens": "15000",
+      "inputTokens": "50000",
+      "modelIntent": "default",
+      "outputTokens": "4000",
+      "tier": 1,
+      "totalCents": 79.5625
+    }
+  ],
+  "totalCacheReadTokens": "110000",
+  "totalCacheWriteTokens": "15000",
+  "totalCostCents": 1330.0,
+  "totalInputTokens": "170000",
+  "totalOutputTokens": "12000"
+}
