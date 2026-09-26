@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 
+/// The menu-bar popover. Reading order follows what a subscription user
+/// checks first: limits and resets, then what the period cost, then actions.
 struct MenuView: View {
     @Environment(\.openWindow) private var openWindow
 
@@ -14,7 +16,19 @@ struct MenuView: View {
     @State var tab: PeriodTab = .today
     @State var hoveredPeriod: String?
     @State var selectedPeriod: String?
-    @State private var hoveredProvider: String?
+    /// The side panel currently shown beside the popover, if any.
+    // Internal so the limit cards (LimitsViews.swift) can drive the panel.
+    @State var panelTarget: UsagePanelTarget?
+    @State var panelHoverTask: Task<Void, Never>?
+    /// Starts tall so the first measurement shrinks the panel once instead
+    /// of growing it after it appears.
+    @State private var contentHeight: CGFloat = 760
+    @State private var appliedDefaultPeriod = false
+
+    static let width: CGFloat = 360
+    /// Offscreen renders take one layout pass, so the measured height never
+    /// settles; the preview harness draws the content at full height instead.
+    var rendersFullHeight = false
 
     struct ProviderSummary: Identifiable {
         var name: String
@@ -32,7 +46,7 @@ struct MenuView: View {
     }
 
     /// Rows for the current tab with hidden providers already removed, so the
-    /// hero number, chart, and provider list all agree with each other.
+    /// summary number, chart, and provider list all agree with each other.
     func visibleRows(for tab: PeriodTab) -> [PeriodRow] {
         (store.snapshot?.rows(for: tab) ?? []).map { $0.filtered(hidingProviders: hiddenProviders) }
     }
@@ -49,28 +63,13 @@ struct MenuView: View {
         return currentRow
     }
 
+
     private var displayedCost: Double {
-        if let hoveredProvider,
-           let provider = providerSummaries.first(where: { $0.name == hoveredProvider }) {
-            return provider.cost
-        }
-        return hoveredChartPoint?.cost ?? displayedRow.cost
+        hoveredChartPoint?.cost ?? displayedRow.cost
     }
 
     private var displayedTokens: Int {
-        if let hoveredProvider,
-           let provider = providerSummaries.first(where: { $0.name == hoveredProvider }) {
-            return provider.totalTokens
-        }
-        return hoveredChartPoint?.tokens ?? displayedRow.totalTokens
-    }
-
-    private var summaryRow: PeriodRow {
-        if let hoveredPeriod,
-           let row = visibleRows(for: tab).first(where: { $0.period == hoveredPeriod }) {
-            return row
-        }
-        return displayedRow
+        hoveredChartPoint?.tokens ?? displayedRow.totalTokens
     }
 
     private var hasUsageData: Bool {
@@ -78,58 +77,33 @@ struct MenuView: View {
         return (snapshot.daily + snapshot.weekly + snapshot.monthly).contains(where: rowHasUsage)
     }
 
-    private var hasVisibleLimits: Bool {
-        !limitProviders.isEmpty
+    private var showsLimitCards: Bool {
+        preferences.showsLimits && !limitCards.isEmpty
     }
 
-    /// Providers with a live limit to show. Only Claude (real quota or local
-    /// estimate) and Codex (session-reported) have limit sources today; idle
-    /// providers and providers hidden from the menu render nothing.
-    var limitProviders: [String] {
-        var providers: [String] = []
-        if preferences.isProviderVisibleInMenu("claude"), hasClaudeLimitData {
-            providers.append("claude")
+    /// The row the provider list describes: a hovered chart bar wins over
+    /// the pinned or current period, matching the headline number.
+    private var listedRow: PeriodRow {
+        if let hoveredPeriod,
+           let row = visibleRows(for: tab).first(where: { $0.period == hoveredPeriod }) {
+            return row
         }
-        if preferences.isProviderVisibleInMenu("codex"), hasCodexLimitData {
-            providers.append("codex")
-        }
-        if preferences.isProviderVisibleInMenu("cursor"), hasCursorLimitData {
-            providers.append("cursor")
-        }
-        return providers
-    }
-
-    private var hasCursorLimitData: Bool {
-        store.snapshot?.cursorQuota?.activeWindows().isEmpty == false
-    }
-
-    private var hasClaudeLimitData: Bool {
-        if store.snapshot?.claudeQuota?.activeWindows().isEmpty == false { return true }
-        return store.snapshot?.activeBlock.map { $0.end > .now } == true
-    }
-
-    private var hasCodexLimitData: Bool {
-        store.snapshot?.codexQuota?.activeWindows().isEmpty == false
+        return displayedRow
     }
 
     var providerSummaries: [ProviderSummary] {
+        let displayedRow = listedRow
         var summaries = displayedRow.agents.map {
             ProviderSummary(
-                name: $0.name,
-                cost: $0.cost,
-                totalTokens: $0.totalTokens,
-                inputTokens: $0.inputTokens,
-                outputTokens: $0.outputTokens,
+                name: $0.name, cost: $0.cost, totalTokens: $0.totalTokens,
+                inputTokens: $0.inputTokens, outputTokens: $0.outputTokens,
                 cacheReadTokens: $0.cacheReadTokens
             )
         }
         if let other = displayedRow.unattributed {
             summaries.append(ProviderSummary(
-                name: other.name,
-                cost: other.cost,
-                totalTokens: other.totalTokens,
-                inputTokens: other.inputTokens,
-                outputTokens: other.outputTokens,
+                name: other.name, cost: other.cost, totalTokens: other.totalTokens,
+                inputTokens: other.inputTokens, outputTokens: other.outputTokens,
                 cacheReadTokens: other.cacheReadTokens
             ))
         }
@@ -146,20 +120,9 @@ struct MenuView: View {
         return names.intersection(hiddenProviders).count
     }
 
-    private var activityProviderNames: String {
-        let rows = visibleRows(for: tab)
-        var names = Set(rows.flatMap { $0.agents.map(\.name) })
-        if rows.contains(where: { $0.unattributed != nil }) {
-            names.insert("other")
-        }
-        let displayNames = names
-            .map(AgentPalette.displayName)
-            .sorted()
-        return displayNames.isEmpty ? "No providers" : displayNames.joined(separator: ", ")
-    }
-
     private var activityAccessibilityValue: String {
-        var value = "Providers: \(activityProviderNames)"
+        var value = "Providers: " + Set(visibleRows(for: tab).flatMap { $0.agents.map(\.name) })
+            .map(AgentPalette.displayName).sorted().joined(separator: ", ")
         if selectedPeriod != nil {
             value += ". Pinned \(periodCaption), \(Format.cost(displayedRow.cost)), " +
                 "\(displayedRow.totalTokens.formatted(.number)) processed tokens"
@@ -168,107 +131,75 @@ struct MenuView: View {
     }
 
     private func rowHasUsage(_ row: PeriodRow) -> Bool {
-        row.cost > 0 || row.totalTokens > 0 || row.inputTokens > 0 ||
-            row.outputTokens > 0 || row.cacheReadTokens > 0 ||
-            !row.agents.isEmpty || !row.models.isEmpty
+        row.cost > 0 || row.totalTokens > 0 || !row.agents.isEmpty || !row.models.isEmpty
+    }
+
+    // MARK: Layout
+
+    var body: some View {
+        if rendersFullHeight {
+            menuContent
+        } else {
+            scrollingBody
+        }
+    }
+
+    private var scrollingBody: some View {
+        ScrollView(.vertical) {
+            menuContent
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: MenuContentHeightKey.self, value: geometry.size.height)
+                    }
+                }
+        }
+        .scrollIndicators(.hidden)
+        .scrollBounceBehavior(.basedOnSize)
+        .onPreferenceChange(MenuContentHeightKey.self) { height in
+            if height > 0 { contentHeight = height }
+        }
+        .frame(width: Self.width, height: min(contentHeight, maximumPopoverHeight))
+        .onAppear {
+            // Netra is a menu-bar-only app, so it is not active when the
+            // popover opens, and SwiftUI does not deliver hover to an
+            // inactive app's window. Activate so hover works immediately.
+            NSApp.activate()
+            if !appliedDefaultPeriod {
+                tab = preferences.defaultPeriod
+                appliedDefaultPeriod = true
+            }
+            store.refreshIfStale()
+        }
     }
 
     private var menuContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            periodPicker
-            usageSummary
-
-            if !hasUsageData {
-                emptyState
-            } else {
-                if preferences.showsLimits && hasVisibleLimits {
-                    sectionDivider
-                    limitsSection
-                }
-                if preferences.showsActivityChart {
-                    sectionDivider
-                    activitySection
-                }
-                if preferences.showsProviderBreakdown {
-                    sectionDivider
-                    providerSection
-                }
-            }
-
-            sectionDivider
-            dashboardActions
-
-            if preferences.showsKeepAwake {
+            if showsLimitCards {
+                limitsSection
                 sectionDivider
-                awakeSection
             }
-
+            if hasUsageData {
+                usageSection
+            } else {
+                emptyState
+            }
+            if updates.availableVersion != nil {
+                sectionDivider
+                updateBanner
+            }
             sectionDivider
             footer
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: Self.width)
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    var body: some View {
-        ScrollView(.vertical) {
-            menuContent
-        }
-        .scrollIndicators(.visible)
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(width: 340, height: preferredPopoverHeight)
-        .onAppear { store.refreshIfStale() }
-    }
-
-    private var preferredPopoverHeight: CGFloat {
-        // Header + period picker + hero summary + dashboard actions + footer.
-        var height: CGFloat = 230
-        if !hasUsageData {
-            height += 70
-        } else {
-            if preferences.showsLimits && hasVisibleLimits { height += limitsSectionHeight }
-            if preferences.showsActivityChart { height += 90 }
-            if preferences.showsProviderBreakdown {
-                height += 28 + CGFloat(min(providerSummaries.count, 4)) * 33
-                if hiddenProviderCount > 0 || providerSummaries.count > 4 { height += 16 }
-            }
-        }
-        if preferences.showsKeepAwake { height += 38 }
-        if updates.availableVersion != nil { height += 22 }
-        return min(max(height, 340), maximumPopoverHeight)
-    }
-
-    /// Mirrors the limits layout: a provider heading plus one meter row per
-    /// window, and a caption line under the local-estimate block.
-    private var limitsSectionHeight: CGFloat {
-        var height: CGFloat = 36 // section header + vertical padding
-        for provider in limitProviders {
-            switch provider {
-            case "claude":
-                if let windows = store.snapshot?.claudeQuota?.activeWindows(), !windows.isEmpty {
-                    height += 24 + CGFloat(windows.count) * 28
-                } else {
-                    height += 24 + 28 + 14 // estimate block includes a caption line
-                }
-            case "codex":
-                let windows = store.snapshot?.codexQuota?.activeWindows().count ?? 1
-                height += 24 + CGFloat(max(windows, 1)) * 28
-            case "cursor":
-                let windows = store.snapshot?.cursorQuota?.activeWindows().count ?? 1
-                height += 24 + CGFloat(max(windows, 1)) * 28
-            default:
-                height += 52
-            }
-        }
-        return height
     }
 
     private var maximumPopoverHeight: CGFloat {
         let visibleHeight = NSApp.keyWindow?.screen?.visibleFrame.height
             ?? NSScreen.main?.visibleFrame.height
             ?? 800
-        return max(360, min(720, visibleHeight - 48))
+        return max(360, min(760, visibleHeight - 48))
     }
 
     private var sectionDivider: some View {
@@ -280,47 +211,77 @@ struct MenuView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Text("Netra")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-            Text("v\(updates.currentVersion ?? "dev")")
-                .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
             Spacer()
             if store.state == .refreshing {
                 ProgressView()
-                    .controlSize(.mini)
+                    .controlSize(.small)
                     .scaleEffect(0.6)
+                    .frame(width: 14, height: 14)
             }
             TimelineView(.periodic(from: .now, by: 10)) { context in
                 Text(headerStatus(now: context.date))
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(headerStatusColor)
                     .lineLimit(1)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 13)
+        .padding(.top, 12)
+        .padding(.bottom, showsLimitCards ? 0 : 8)
     }
 
     private var headerStatusColor: Color {
         switch store.state {
-        case .failed: .orange
-        default: Color(nsColor: .tertiaryLabelColor)
+        case .failed, .stale: .orange
+        default: .secondary
         }
     }
 
     private func headerStatus(now: Date) -> String {
         switch store.state {
-        case .refreshing: return "refreshing…"
-        case .failed: return store.snapshot == nil ? "refresh failed" : "showing saved data"
-        case .empty: return "no data yet"
+        case .refreshing: return "Refreshing…"
+        case .failed: return store.snapshot == nil ? "Refresh failed" : "Couldn't refresh · showing saved"
+        case .empty: return "No data yet"
         case .fresh, .stale:
             guard let at = store.snapshot?.fetchedAt else { return "" }
             let age = Format.age(since: at, now: now)
-            return store.state == .stale ? "stale · \(age)" : "updated \(age)"
+            return store.state == .stale ? "Saved data · \(age)" : "Updated \(age)"
         }
     }
 
-    // MARK: Summary
+    // MARK: Usage
+
+    private var usageSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center) {
+                Text("Usage")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                periodPicker
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            usageSummary
+            if preferences.showsActivityChart {
+                chart
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Provider activity for \(tab.rawValue.lowercased())")
+                    .accessibilityValue(activityAccessibilityValue)
+                    .accessibilityHint("Swipe up or down to pin a period. Open Usage for detailed values.")
+                    .accessibilityAdjustableAction { direction in
+                        adjustPinnedPeriod(direction)
+                    }
+                    .accessibilityAction(named: "Clear pinned period") {
+                        selectedPeriod = nil
+                    }
+            }
+            if preferences.showsProviderBreakdown && (!providerSummaries.isEmpty || hiddenProviderCount > 0) {
+                providerList
+            }
+        }
+        .padding(.bottom, 6)
+    }
 
     private var periodPicker: some View {
         Picker("Period", selection: $tab) {
@@ -331,12 +292,11 @@ struct MenuView: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .controlSize(.small)
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
+        .fixedSize()
         .onChange(of: tab) {
             hoveredPeriod = nil
             selectedPeriod = nil
-            hoveredProvider = nil
+            panelTarget = nil
         }
     }
 
@@ -344,29 +304,35 @@ struct MenuView: View {
         Button {
             showDashboard(.usage)
         } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Format.cost(displayedCost))
-                        .font(.system(size: 32, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Format.cost(displayedCost))
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(summaryCaption)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+                    Text("\(Format.tokens(displayedTokens)) tokens")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
-                Text(summaryCaption)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                summaryMetadata
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .help("Estimated at API list prices — what this usage would cost pay-as-you-go, not your subscription bill. Click for the full dashboard.")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Usage for \(periodCaption)")
         .accessibilityValue(
@@ -376,359 +342,253 @@ struct MenuView: View {
         .accessibilityHint("Opens the detailed usage dashboard")
     }
 
-    private var summaryMetadata: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 5) {
-                summaryMetadataContent
-                Spacer()
-                pinnedPeriodLabel
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                summaryMetadataContent
-                pinnedPeriodLabel
-            }
-        }
-        .font(.system(size: 9.5))
-        .foregroundStyle(.tertiary)
-    }
-
-    private var summaryMetadataContent: some View {
-        HStack(spacing: 5) {
-            Text("\(Format.tokens(displayedTokens)) processed")
-            Text("·")
-            Text(tokenComposition)
-        }
-    }
-
-    @ViewBuilder
-    private var pinnedPeriodLabel: some View {
-        if selectedPeriod != nil {
-            Text("Pinned")
-                .foregroundStyle(Color.accentColor)
-        }
-    }
-
     private var summaryCaption: String {
-        if let provider = hoveredProvider {
-            return "\(AgentPalette.displayName(provider)) · equivalent API cost · \(periodCaption)"
-        }
         if let hoveredChartPoint {
-            return "Equivalent API cost · \(hoveredChartPoint.label)"
+            return "API-equivalent · \(hoveredChartPoint.label)"
         }
-        return "Equivalent API cost, not subscription spend · \(periodCaption)"
-    }
-
-    private var tokenComposition: String {
-        let row: (input: Int, output: Int, cached: Int)
-        if let hoveredProvider,
-           let provider = providerSummaries.first(where: { $0.name == hoveredProvider }) {
-            row = (provider.inputTokens, provider.outputTokens, provider.cacheReadTokens)
-        } else {
-            row = (summaryRow.inputTokens, summaryRow.outputTokens, summaryRow.cacheReadTokens)
-        }
-        return "\(Format.tokens(row.output)) out · \(Format.tokens(row.cached)) cached"
+        return selectedPeriod == nil
+            ? "API-equivalent · \(periodCaption)"
+            : "API-equivalent · \(periodCaption) · pinned"
     }
 
     var periodCaption: String {
-        let calendar = Calendar.current
         switch tab {
         case .today:
             if selectedPeriod == nil { return "today" }
             return displayedRow.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
         case .week:
-            let week = calendar.component(.weekOfYear, from: displayedRow.date)
-            return "week \(week)"
+            if selectedPeriod == nil { return "this week" }
+            return "week \(PeriodKeys.weeks().component(.weekOfYear, from: displayedRow.date))"
         case .month:
-            return displayedRow.date.formatted(.dateTime.month(.wide).year())
+            return displayedRow.date.formatted(.dateTime.month(.wide))
         }
     }
 
-    // MARK: Compact sections
-
-    private var limitsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Subscriptions", detail: limitsSectionDetail)
-            ForEach(limitProviders, id: \.self) { agent in
-                limitsContent(for: agent)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-    private var limitsSectionDetail: String {
-        store.snapshot?.claudeQuota == nil && limitProviders.contains("claude")
-            ? "Estimates are labelled" : "Provider reported"
-    }
-
-    private var activitySection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("Activity", detail: selectedPeriod == nil ? "Click a bar to pin" : "Pinned · click again to clear")
-                .padding(.horizontal, 16)
-                .padding(.top, 9)
-            chart
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Provider activity for \(tab.rawValue.lowercased())")
-                .accessibilityValue(activityAccessibilityValue)
-                .accessibilityHint("Swipe up or down to pin a period. Open Usage for detailed values.")
-                .accessibilityAdjustableAction { direction in
-                    adjustPinnedPeriod(direction)
-                }
-                .accessibilityAction(named: "Clear pinned period") {
-                    selectedPeriod = nil
-                }
-        }
-    }
-
-    private var providerSection: some View {
-        let providers = Array(providerSummaries.prefix(4))
-        return VStack(alignment: .leading, spacing: 4) {
-            sectionHeader("Providers", detail: periodCaption.capitalized)
+    private var providerList: some View {
+        let providers = Array(providerSummaries.prefix(5))
+        return VStack(alignment: .leading, spacing: 2) {
             ForEach(providers) { provider in
                 providerRow(provider)
-                    .onHover { inside in
-                        hoveredProvider = inside
-                            ? provider.name
-                            : (hoveredProvider == provider.name ? nil : hoveredProvider)
-                    }
             }
             if providerSummaries.isEmpty {
-                Text(hiddenProviderCount > 0
-                     ? "All providers with usage are hidden — adjust in Settings"
-                     : "No provider usage in this period")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .padding(.vertical, 3)
-            } else {
-                providerSectionFootnote(overflow: providerSummaries.count - providers.count)
+                Text("All providers with usage are hidden — adjust in Settings")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            let overflow = providerSummaries.count - providers.count
+            if overflow > 0 || hiddenProviderCount > 0 {
+                HStack {
+                    if overflow > 0 {
+                        Button("\(overflow) more in Usage") { showDashboard(.usage) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    Spacer()
+                    if hiddenProviderCount > 0 {
+                        Button("\(hiddenProviderCount) hidden") { showDashboard(.providers) }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Some providers are hidden from this menu. Manage them in Settings.")
+                    }
+                }
+                .font(.system(size: 10.5))
+                .padding(.top, 2)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 9)
+        .padding(.top, 4)
+        .padding(.bottom, 6)
     }
 
-    @ViewBuilder
-    private func providerSectionFootnote(overflow: Int) -> some View {
-        HStack(spacing: 6) {
-            if overflow > 0 {
-                Button("View \(overflow) more in Usage") {
-                    showDashboard(.usage)
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 9.5, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-            }
-            Spacer()
-            if hiddenProviderCount > 0 {
-                Button("\(hiddenProviderCount) hidden") {
-                    showDashboard(.settings)
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.tertiary)
-                .help("Some providers are hidden from this menu. Manage them in Settings.")
+    // MARK: Side panel
+
+    /// Opens the side panel after a short hover (so passing the mouse over
+    /// the list does not flash panels) and closes it shortly after leaving.
+    func panelHover(_ target: UsagePanelTarget, inside: Bool) {
+        panelHoverTask?.cancel()
+        panelHoverTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(inside ? 250 : 180))
+            guard !Task.isCancelled else { return }
+            if inside {
+                panelTarget = target
+            } else if panelTarget == target {
+                panelTarget = nil
             }
         }
-        .padding(.top, 2)
+    }
+
+    func panelBinding(_ target: UsagePanelTarget) -> Binding<Bool> {
+        Binding(
+            get: { panelTarget == target },
+            set: { shown in if !shown, panelTarget == target { panelTarget = nil } }
+        )
+    }
+
+    func detailPanel(for target: UsagePanelTarget) -> UsageDetailPanel {
+        let row = listedRow
+        switch target {
+        case .provider(let name):
+            let agent = name == "other" ? row.unattributed : row.agentStat(name)
+            return UsageDetailPanel(
+                title: AgentPalette.displayName(name), accent: AgentPalette.color(for: name),
+                periodCaption: periodCaption,
+                cost: agent?.cost ?? 0, totalTokens: agent?.totalTokens ?? 0,
+                inputTokens: agent?.inputTokens ?? 0, outputTokens: agent?.outputTokens ?? 0,
+                cacheCreationTokens: agent?.cacheCreationTokens ?? 0, cacheReadTokens: agent?.cacheReadTokens ?? 0,
+                models: (agent?.models ?? []).map { (nil, $0) },
+                periods: PeriodTab.allCases.map { period in
+                    let stat = store.snapshot?.currentRow(for: period).agentStat(name)
+                    return (period.caption, stat?.cost ?? 0, stat?.totalTokens ?? 0)
+                }
+            )
+        }
     }
 
     private func providerRow(_ provider: ProviderSummary) -> some View {
-        let share = displayedRow.cost > 0 ? provider.cost / displayedRow.cost : 0
-        return VStack(spacing: 3) {
-            ViewThatFits(in: .horizontal) {
-                providerMetrics(provider, share: share)
-                VStack(alignment: .leading, spacing: 2) {
-                    providerIdentity(provider)
-                    HStack {
-                        Text("\(Format.tokens(provider.totalTokens)) processed")
-                            .foregroundStyle(.tertiary)
-                        Spacer()
-                        Text(Format.cost(provider.cost))
-                            .fontWeight(.medium)
-                            .monospacedDigit()
-                    }
-                    .font(.system(size: 10))
-                }
-            }
-            GeometryReader { geometry in
-                Capsule()
-                    .fill(.quaternary)
-                    .overlay(alignment: .leading) {
-                        Capsule()
-                            .fill(AgentPalette.color(for: provider.name).opacity(0.8))
-                            .frame(width: geometry.size.width * max(0, min(share, 1)))
-                    }
-            }
-            .frame(height: 3)
+        let row = listedRow
+        let share = row.cost > 0 ? provider.cost / row.cost : 0
+        let cost = Format.providerCost(provider.name, cost: provider.cost, tokens: provider.totalTokens)
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(AgentPalette.color(for: provider.name))
+                .frame(width: 7, height: 7)
+            Text(AgentPalette.displayName(provider.name))
+                .font(.system(size: 12))
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Text(Format.tokens(provider.totalTokens))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Text(cost)
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+                .frame(minWidth: 52, alignment: .trailing)
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AgentPalette.displayName(provider.name))
         .accessibilityValue(
-            "\(Format.cost(provider.cost)), " +
+            (Format.isUnpriced(provider.name, cost: provider.cost, tokens: provider.totalTokens)
+                ? "cost not estimated, " : "\(Format.cost(provider.cost)), ") +
             "\(provider.totalTokens.formatted(.number)) processed tokens, " +
             "\(Int((share * 100).rounded())) percent of this period"
         )
-    }
-
-    private func providerMetrics(_ provider: ProviderSummary, share: Double) -> some View {
-        HStack(spacing: 7) {
-            providerIdentity(provider)
-            Spacer()
-            Text((share).formatted(.percent.precision(.fractionLength(0))))
-                .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
-            Text(Format.tokens(provider.totalTokens))
-                .font(.system(size: 9.5))
-                .foregroundStyle(.tertiary)
-            Text(Format.cost(provider.cost))
-                .font(.system(size: 11, weight: .medium))
-                .monospacedDigit()
-                .frame(minWidth: 44, alignment: .trailing)
-        }
-    }
-
-    private func providerIdentity(_ provider: ProviderSummary) -> some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(AgentPalette.color(for: provider.name))
-                .frame(width: 6, height: 6)
-                .accessibilityHidden(true)
-            Text(AgentPalette.displayName(provider.name))
-                .font(.system(size: 11))
-                .lineLimit(2)
-        }
-    }
-
-    func sectionHeader(_ title: String, detail: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title.uppercased())
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(0.5)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(detail)
-                .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
-                .lineLimit(1)
-        }
     }
 
     // MARK: Empty and failure states
 
     @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 6) {
             if case .failed(let message) = store.state {
                 Text("Couldn't read agent usage")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                 Text(message)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                 Button("Retry") { Task { await store.refresh() } }
                     .controlSize(.small)
-            } else if store.state == .refreshing {
+            } else if store.state == .refreshing || store.state == .empty {
                 Text("Scanning local agent logs…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             } else {
                 Text("No agent usage found")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                 Text("Run a coding agent (Claude Code, Codex, Gemini CLI, …) once, then refresh.")
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .padding(.vertical, 16)
     }
 
-    // MARK: Dashboard actions
+    // MARK: Footer
 
-    private var dashboardActions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
-                dashboardButton("Open Usage", symbol: "chart.xyaxis.line", section: .usage)
-                dashboardButton("Settings", symbol: "gearshape", section: .settings)
-            }
-            VStack(spacing: 6) {
-                dashboardButton("Open Usage", symbol: "chart.xyaxis.line", section: .usage)
-                dashboardButton("Settings", symbol: "gearshape", section: .settings)
-            }
+    private var updateBanner: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.down.circle")
+            Text("v\(updates.availableVersion ?? "") available · brew upgrade netra")
+            Spacer()
         }
-        .padding(.horizontal, 12)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(Color.accentColor)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
-    private func dashboardButton(
-        _ title: String,
-        symbol: String,
-        section: DashboardSection
-    ) -> some View {
-        Button {
-            showDashboard(section)
+    private var footer: some View {
+        HStack(spacing: 2) {
+            if preferences.showsKeepAwake {
+                keepAwakeControl
+            }
+            Spacer(minLength: 4)
+            footerIcon("chart.xyaxis.line", help: "Usage dashboard") { showDashboard(.usage) }
+            footerIcon("gearshape", help: "Settings") { showDashboard(.menuBar) }
+            footerIcon("arrow.clockwise", help: "Refresh now") { Task { await store.refresh() } }
+            footerIcon("moon", help: "Lock & Sleep") { awake.lockAndSleep() }
+            footerIcon("power", help: "Quit Netra") { NSApplication.shared.terminate(nil) }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+
+    private var keepAwakeControl: some View {
+        Menu {
+            if awake.isAwake {
+                Button("Turn off") { awake.setAwake(false) }
+                Divider()
+            }
+            Button("For 1 hour") { awake.hold(for: 3600) }
+            Button("For 4 hours") { awake.hold(for: 4 * 3600) }
+            Button("Until turned off") { awake.setAwake(true) }
         } label: {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 10.5, weight: .medium))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+            HStack(spacing: 5) {
+                Image(systemName: awake.isAwake ? "eye.fill" : "eye")
+                Text(awake.isAwake ? "Awake \(awakeStatusShort)" : "Keep awake")
+            }
+            .font(.system(size: 11.5, weight: awake.isAwake ? .semibold : .regular))
+            .foregroundStyle(awake.isAwake ? Color.accentColor : .secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .padding(.horizontal, 6)
+        .help("Blocks idle sleep so agents keep running. The display still sleeps; closing the lid still sleeps the Mac.")
+    }
+
+    private var awakeStatusShort: String {
+        switch awake.mode {
+        case .off: ""
+        case .indefinite: "· on"
+        case .until(let date): "· until \(date.formatted(date: .omitted, time: .shortened))"
+        }
+    }
+
+    private func footerIcon(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 24)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 
     private func showDashboard(_ section: DashboardSection) {
         dashboardNavigation.selection = section
         openWindow(id: "dashboard")
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    // MARK: Awake
-
-    private var awakeSection: some View {
-        HStack(spacing: 8) {
-            Label {
-                Text("Keep awake")
-                    .font(.system(size: 11.5, weight: .medium))
-            } icon: {
-                Image(systemName: awake.isAwake ? "eye.fill" : "eye")
-                    .font(.system(size: 11))
-            }
-            .help("Blocks idle sleep so agents keep running. The display still sleeps; closing the lid still sleeps the Mac.")
-            Spacer()
-            if awake.isAwake {
-                Text(awakeStatusShort)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(Color.accentColor)
-            } else {
-                HStack(spacing: 4) {
-                    durationButton("1h") { awake.hold(for: 3600) }
-                    durationButton("4h") { awake.hold(for: 4 * 3600) }
-                }
-            }
-            Toggle("Keep awake", isOn: Binding(
-                get: { awake.isAwake },
-                set: { awake.setAwake($0) }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .labelsHidden()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-    }
-
-    private var awakeStatusShort: String {
-        switch awake.mode {
-        case .off: ""
-        case .indefinite: "until turned off"
-        case .until(let date): "until \(date.formatted(date: .omitted, time: .shortened))"
-        }
     }
 
     private func adjustPinnedPeriod(_ direction: AccessibilityAdjustmentDirection) {
@@ -757,74 +617,11 @@ struct MenuView: View {
             break
         }
     }
+}
 
-    private func durationButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(.quaternary, in: Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: Footer
-
-    private var footer: some View {
-        VStack(spacing: 8) {
-            if let version = updates.availableVersion {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.down.circle")
-                    Text("v\(version) available · brew upgrade netra")
-                    Spacer()
-                }
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-            }
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    refreshButton
-                    Spacer()
-                    lockAndSleepButton
-                    Spacer()
-                    quitButton
-                }
-                VStack(alignment: .leading, spacing: 7) {
-                    refreshButton
-                    lockAndSleepButton
-                    quitButton
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 9)
-    }
-
-    private var refreshButton: some View {
-        footerButton("arrow.clockwise", "Refresh") {
-            Task { await store.refresh() }
-        }
-    }
-
-    private var lockAndSleepButton: some View {
-        footerButton("moon.fill", "Lock & Sleep") {
-            awake.lockAndSleep()
-        }
-    }
-
-    private var quitButton: some View {
-        footerButton("power", "Quit") {
-            NSApplication.shared.terminate(nil)
-        }
-    }
-
-    private func footerButton(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
-        }
-        .buttonStyle(.plain)
+private struct MenuContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

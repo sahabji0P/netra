@@ -4,6 +4,7 @@ import UserNotifications
 
 enum MenuBarDisplayMode: String, CaseIterable, Identifiable, Sendable {
     case iconOnly
+    case limitBars
     case todayCost
     case todayTokens
     case highestProviderLimit
@@ -13,6 +14,7 @@ enum MenuBarDisplayMode: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .iconOnly: "Icon only"
+        case .limitBars: "Limit bars"
         case .todayCost: "Today's cost"
         case .todayTokens: "Today's tokens"
         case .highestProviderLimit: "Highest usage indicator"
@@ -22,9 +24,25 @@ enum MenuBarDisplayMode: String, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .iconOnly: "Keep the menu bar minimal"
+        case .limitBars: "Short-window and weekly bars for the provider closest to its limit"
         case .todayCost: "Estimated API-equivalent cost"
         case .todayTokens: "Tokens processed today"
-        case .highestProviderLimit: "Provider limit or local estimate"
+        case .highestProviderLimit: "Percent used of the provider closest to its limit"
+        }
+    }
+}
+
+/// How limit reset times read in the popover.
+enum ResetTimeStyle: String, CaseIterable, Identifiable, Sendable {
+    case countdown
+    case clock
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .countdown: "Countdown (in 2d 4h)"
+        case .clock: "Date and time (Mon 3:19 PM)"
         }
     }
 }
@@ -42,6 +60,11 @@ final class AppPreferences {
         static let showsActivityChart = "preferences.popover.showsActivityChart"
         static let showsKeepAwake = "preferences.popover.showsKeepAwake"
         static let hiddenMenuProviders = "preferences.popover.hiddenProviders"
+        static let barsShowRemaining = "preferences.popover.barsShowRemaining"
+        static let resetTimeStyle = "preferences.popover.resetTimeStyle"
+        static let showsPace = "preferences.popover.showsPace"
+        static let limitProviderOrder = "preferences.popover.limitProviderOrder"
+        static let defaultPeriod = "preferences.popover.defaultPeriod"
         static let claudeQuotaEnabled = "preferences.limits.claudeQuotaEnabled"
         static let cursorUsageEnabled = "preferences.limits.cursorUsageEnabled"
         static let confettiOnReset = "preferences.celebrate.confettiOnReset"
@@ -75,16 +98,53 @@ final class AppPreferences {
     var hiddenMenuProviders: Set<String> {
         didSet { defaults.set(hiddenMenuProviders.sorted(), forKey: Key.hiddenMenuProviders) }
     }
+    /// Limit bars fill with what is left instead of what is used.
+    var barsShowRemaining: Bool {
+        didSet { defaults.set(barsShowRemaining, forKey: Key.barsShowRemaining) }
+    }
+    var resetTimeStyle: ResetTimeStyle {
+        didSet { defaults.set(resetTimeStyle.rawValue, forKey: Key.resetTimeStyle) }
+    }
+    /// Show whether usage is ahead of or behind an even burn to the reset.
+    var showsPace: Bool {
+        didSet { defaults.set(showsPace, forKey: Key.showsPace) }
+    }
+    /// Order of provider limit cards; providers not listed keep default order.
+    var limitProviderOrder: [String] {
+        didSet { defaults.set(limitProviderOrder, forKey: Key.limitProviderOrder) }
+    }
+    /// The period the popover opens on.
+    var defaultPeriod: PeriodTab {
+        didSet { defaults.set(defaultPeriod.rawValue, forKey: Key.defaultPeriod) }
+    }
+
+    nonisolated static let limitProviders = ["claude", "codex", "cursor"]
+
+    /// Known limit providers in the user's order.
+    var orderedLimitProviders: [String] {
+        let known = Self.limitProviders
+        return limitProviderOrder.filter(known.contains) + known.filter { !limitProviderOrder.contains($0) }
+    }
+
+    func moveLimitProvider(_ provider: String, by offset: Int) {
+        var order = orderedLimitProviders
+        guard let index = order.firstIndex(of: provider) else { return }
+        let target = min(max(index + offset, 0), order.count - 1)
+        guard target != index else { return }
+        order.swapAt(index, target)
+        limitProviderOrder = order
+    }
+
     /// Opt-in: fetch real Claude subscription limits with the OAuth token
     /// Claude Code keeps in the Keychain. Off by default because reading that
     /// Keychain item triggers a one-time macOS authorization prompt.
     var claudeQuotaEnabled: Bool {
         didSet { defaults.set(claudeQuotaEnabled, forKey: Key.claudeQuotaEnabled) }
     }
-    /// Opt-in: Cursor writes no usage data to local disk, so the only source is
-    /// Cursor's own saved login token plus its undocumented usage API. Off by
-    /// default because it reads another app's credential store and calls an
-    /// endpoint that can change without notice.
+    /// Opt-in: query Cursor's undocumented dashboard API (limits and per-event
+    /// history) with the login Cursor already saved. Off by default because
+    /// it reads another app's credential store and calls endpoints that can
+    /// change.
     var cursorUsageEnabled: Bool {
         didSet { defaults.set(cursorUsageEnabled, forKey: Key.cursorUsageEnabled) }
     }
@@ -135,6 +195,13 @@ final class AppPreferences {
         showsActivityChart = defaults.object(forKey: Key.showsActivityChart) as? Bool ?? true
         showsKeepAwake = defaults.object(forKey: Key.showsKeepAwake) as? Bool ?? true
         hiddenMenuProviders = Set(defaults.stringArray(forKey: Key.hiddenMenuProviders) ?? [])
+        barsShowRemaining = defaults.object(forKey: Key.barsShowRemaining) as? Bool ?? false
+        resetTimeStyle = defaults.string(forKey: Key.resetTimeStyle)
+            .flatMap(ResetTimeStyle.init(rawValue:)) ?? .countdown
+        showsPace = defaults.object(forKey: Key.showsPace) as? Bool ?? true
+        limitProviderOrder = defaults.stringArray(forKey: Key.limitProviderOrder) ?? []
+        defaultPeriod = defaults.string(forKey: Key.defaultPeriod)
+            .flatMap(PeriodTab.init(rawValue:)) ?? .today
         claudeQuotaEnabled = defaults.object(forKey: Key.claudeQuotaEnabled) as? Bool ?? false
         cursorUsageEnabled = defaults.object(forKey: Key.cursorUsageEnabled) as? Bool ?? false
         confettiOnReset = defaults.object(forKey: Key.confettiOnReset) as? Bool ?? true

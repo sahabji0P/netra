@@ -7,15 +7,6 @@ import SwiftUI
 /// colorblind separation and surface contrast in both appearances; provider
 /// marks are always paired with a text label, never color alone.
 enum AgentPalette {
-    /// Agents ccusage 20.0.19 can detect for token/cost, in a stable
-    /// presentation order. The long tail shares the neutral color but keeps
-    /// its own display name.
-    static let knownAgents: [String] = [
-        "claude", "codex", "opencode", "gemini", "pi", "copilot",
-        "hermes", "droid", "amp", "goose", "kilo", "codebuff", "kimi",
-        "qwen", "openclaw",
-    ]
-
     static func color(for agent: String) -> Color {
         switch agent.lowercased() {
         case "claude": dynamic(light: 0xC65D33, dark: 0xD4653A)   // terracotta
@@ -69,10 +60,6 @@ enum AgentPalette {
         }
     }
 
-    static func modelColor(for model: String) -> Color {
-        color(for: provider(forModel: model) ?? "other")
-    }
-
     /// Best-effort provider inference from a model id, for rows where ccusage
     /// reports a model without an agent attribution.
     static func provider(forModel model: String) -> String? {
@@ -83,11 +70,19 @@ enum AgentPalette {
         }
         if m.hasPrefix("gemini") { return "gemini" }
         if m.hasPrefix("kimi") || m.hasPrefix("deepseek") || m.hasPrefix("qwen") { return "opencode" }
+        if m.hasPrefix("composer") || m.hasPrefix("grok") || m.hasPrefix("cursor") { return "cursor" }
         return nil
     }
 
     /// Trim noisy date-stamp suffixes: claude-haiku-4-5-20251001 → claude-haiku-4-5
     static func modelDisplayName(_ model: String) -> String {
+        // Cursor reports its Auto model selection as the intent "default",
+        // and Grok Bot (its separate weekly allowance) as grok-bot-*.
+        if model == "default" { return "Auto" }
+        if model.hasPrefix("grok-bot") {
+            let mode = model.dropFirst("grok-bot".count).drop { $0 == "-" }
+            return mode.isEmpty || mode == "default" ? "Grok Bot" : "Grok Bot · \(mode)"
+        }
         if let range = model.range(of: #"-20\d{6}$"#, options: .regularExpression) {
             return String(model[..<range.lowerBound])
         }
@@ -95,14 +90,14 @@ enum AgentPalette {
     }
 }
 
-/// Shared styling for limit meters: the provider's identity color while
-/// comfortable, fixed status colors as a window approaches exhaustion.
+/// Shared styling for limit meters. Bars always use the provider's color.
 enum LimitStyle {
-    static func meterColor(percent: Double, status: String, agent: String) -> Color {
-        if status == "exceeds" || percent >= 90 { return Color(nsColor: NSColor(rgb: 0xD03B3B)) }
-        if status == "warning" || percent >= 70 { return Color(nsColor: NSColor(rgb: 0xFAB219)) }
-        return AgentPalette.color(for: agent)
+    /// Popover bars keep the provider color; only the number turns red
+    /// once a window is nearly exhausted, so color never means two things.
+    static func amountColor(usedPercent: Double) -> Color {
+        usedPercent >= 90 ? Color(nsColor: NSColor(rgb: 0xD03B3B)) : .primary
     }
+
 }
 
 private extension NSColor {

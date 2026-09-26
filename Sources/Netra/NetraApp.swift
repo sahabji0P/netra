@@ -52,7 +52,13 @@ struct NetraApp: App {
                 dashboardNavigation: dashboardNavigation
             )
         } label: {
-            Image(systemName: awake.isAwake ? "eye.fill" : "eye")
+            if preferences.menuBarDisplayMode == .limitBars, let bars = menuBarLimitBars {
+                Image(nsImage: MenuBarIcon.bars(
+                    top: bars.top, bottom: bars.bottom, awake: awake.isAwake
+                ))
+            } else {
+                Image(systemName: awake.isAwake ? "eye.fill" : "eye")
+            }
             if let status = menuBarStatus {
                 Text(status)
             }
@@ -84,18 +90,76 @@ struct NetraApp: App {
                 .filtered(hidingProviders: preferences.hiddenMenuProviders).totalTokens
             return tokens > 0 ? Format.tokens(tokens) : nil
         case .highestProviderLimit:
-            let codex = snapshot.codexQuota?.activeWindows()
-                .map(\.usedPercent)
-                .max()
-            let claude = snapshot.claudeQuota?.activeWindows()
-                .map(\.usedPercent)
-                .max()
-            // The local block estimate stands in only while real Claude
-            // limits are unavailable.
-            let claudeEstimate = claude ?? snapshot.activeBlock
-                .flatMap { $0.end > .now ? $0.percentUsed : nil }
-            let highest = [codex, claudeEstimate].compactMap { $0 }.max()
-            return highest.map { "\(Int($0.rounded()))%" }
+            let highest = limitsForMenuBar(snapshot).compactMap(\.mostConstrained?.usedPercent).max()
+            return highest.map { "\(Int(min($0, 999).rounded()))%" }
+        case .limitBars:
+            return nil
         }
+    }
+
+    /// Provider limits the menu bar may summarize; the Claude local estimate
+    /// only stands in when no real quota exists anywhere.
+    private func limitsForMenuBar(_ snapshot: UsageSnapshot) -> [ProviderLimits] {
+        let all = snapshot.providerLimits(order: preferences.orderedLimitProviders)
+            .filter { preferences.isProviderVisibleInMenu($0.agent) }
+        let real = all.filter { !$0.isEstimate }
+        return real.isEmpty ? all : real
+    }
+
+    /// Fill fractions (0...1) for the provider closest to a limit, honouring
+    /// the used/remaining preference.
+    private var menuBarLimitBars: (top: Double, bottom: Double?)? {
+        guard let snapshot = store.snapshot,
+              let limits = limitsForMenuBar(snapshot).max(by: {
+                  ($0.mostConstrained?.usedPercent ?? 0) < ($1.mostConstrained?.usedPercent ?? 0)
+              }),
+              let windows = limits.iconWindows else { return nil }
+        func fill(_ window: QuotaWindow) -> Double {
+            let used = min(max(window.usedPercent, 0), 100) / 100
+            return preferences.barsShowRemaining ? 1 - used : used
+        }
+        return (fill(windows.top), windows.bottom.map(fill))
+    }
+}
+
+/// Template images for the menu-bar label, drawn so they invert correctly
+/// in light and dark menu bars.
+enum MenuBarIcon {
+    static func bars(top: Double, bottom: Double?, awake: Bool) -> NSImage {
+        let size = NSSize(width: 20, height: 16)
+        let image = NSImage(size: size, flipped: true) { _ in
+            let trackWidth: CGFloat = awake ? 14 : 18
+            let x: CGFloat = 1
+            func bar(y: CGFloat, height: CGFloat, fraction: Double) {
+                let track = NSBezierPath(
+                    roundedRect: NSRect(x: x, y: y, width: trackWidth, height: height),
+                    xRadius: height / 2, yRadius: height / 2
+                )
+                NSColor.black.withAlphaComponent(0.3).setFill()
+                track.fill()
+                let width = max(fraction > 0 ? height : 0, trackWidth * CGFloat(min(max(fraction, 0), 1)))
+                let fill = NSBezierPath(
+                    roundedRect: NSRect(x: x, y: y, width: width, height: height),
+                    xRadius: height / 2, yRadius: height / 2
+                )
+                NSColor.black.setFill()
+                fill.fill()
+            }
+            if let bottom {
+                bar(y: 3, height: 4.5, fraction: top)
+                bar(y: 9.5, height: 3.5, fraction: bottom)
+            } else {
+                bar(y: 5.5, height: 5, fraction: top)
+            }
+            if awake {
+                // A small dot marks Keep Awake without a second icon.
+                NSColor.black.setFill()
+                NSBezierPath(ovalIn: NSRect(x: 16.5, y: 6, width: 3.5, height: 3.5)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Usage limits"
+        return image
     }
 }

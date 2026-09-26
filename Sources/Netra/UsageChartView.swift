@@ -21,8 +21,11 @@ extension MenuView {
         var id: String { "\(period)-\(provider)" }
     }
 
+    /// Monday-first like ccusage's weekly rows, so bars sit on their week.
+    private var chartCalendar: Calendar { PeriodKeys.weeks() }
+
     private var chartPoints: [ChartPoint] {
-        let calendar = Calendar.current
+        let calendar = chartCalendar
         return visibleRows(for: tab).compactMap { row in
             guard row.date >= chartDomain.lowerBound else { return nil }
             let label: String
@@ -71,7 +74,7 @@ extension MenuView {
     }
 
     private var chartDomain: ClosedRange<Date> {
-        let calendar = Calendar.current
+        let calendar = chartCalendar
         let now = Date.now
         switch tab {
         case .today:
@@ -111,8 +114,8 @@ extension MenuView {
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
                             Text(date.formatted(.dateTime.day().month(.abbreviated)))
-                                .font(.system(size: 8))
-                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -120,9 +123,9 @@ extension MenuView {
                 AxisMarks(values: .stride(by: .weekOfYear, count: 2)) { value in
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
-                            Text("W\(Calendar.current.component(.weekOfYear, from: date))")
-                                .font(.system(size: 8))
-                                .foregroundStyle(.tertiary)
+                            Text("W\(chartCalendar.component(.weekOfYear, from: date))")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -131,8 +134,8 @@ extension MenuView {
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
                             Text(date.formatted(.dateTime.month(.abbreviated)))
-                                .font(.system(size: 8))
-                                .foregroundStyle(.tertiary)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -169,7 +172,7 @@ extension MenuView {
     private func period(atX x: CGFloat, proxy: ChartProxy, points: [ChartPoint]) -> String? {
         guard let date: Date = proxy.value(atX: x) else { return nil }
         return points.last {
-            guard let interval = Calendar.current.dateInterval(of: chartUnit, for: $0.date) else {
+            guard let interval = chartCalendar.dateInterval(of: chartUnit, for: $0.date) else {
                 return false
             }
             return interval.contains(date)

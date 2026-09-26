@@ -39,13 +39,41 @@ final class RenderPreviewHarness: XCTestCase {
             awake: AwakeController(),
             updates: UpdateChecker(),
             preferences: preferences,
-            dashboardNavigation: DashboardNavigation()
+            dashboardNavigation: DashboardNavigation(),
+            rendersFullHeight: true
         )
         render(menu, name: "menu", outputDir: outputDir)
 
+        // The subscription-card hover panel (real popovers can't render offscreen).
+        render(menu.detailPanel(for: .provider("claude")), name: "panel-claude", outputDir: outputDir)
+
+        // The template menu-bar icon, enlarged, in both bar layouts.
+        let icons = HStack(spacing: 24) {
+            Image(nsImage: MenuBarIcon.bars(top: 0.7, bottom: 0.3, awake: true))
+            Image(nsImage: MenuBarIcon.bars(top: 0.15, bottom: 0.9, awake: false))
+            Image(nsImage: MenuBarIcon.bars(top: 0.5, bottom: nil, awake: false))
+        }
+        .scaleEffect(4)
+        .frame(width: 420, height: 110)
+        render(icons, name: "menubar-icons", outputDir: outputDir)
+
         let dashboard = DashboardUsageView(store: store)
-            .frame(width: 1100, height: 1500)
+            .frame(width: 1100, height: 1700)
         render(dashboard, name: "dashboard-usage", outputDir: outputDir)
+
+        let navigation = DashboardNavigation(selection: .subscriptions)
+        render(
+            DashboardSubscriptionsView(store: store, preferences: preferences, navigation: navigation)
+                .frame(width: 1100, height: 1000),
+            name: "dashboard-subscriptions", outputDir: outputDir
+        )
+        for section in [DashboardSection.menuBar, .limits, .providers] {
+            render(
+                DashboardSettingsView(section: section, preferences: preferences, store: store)
+                    .frame(width: 860, height: 1000),
+                name: "settings-\(section.rawValue)", outputDir: outputDir
+            )
+        }
 
         // A representative full-screen confetti + banner frame, to eyeball the
         // celebration look without waiting for a real reset.

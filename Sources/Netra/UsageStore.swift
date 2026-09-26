@@ -46,6 +46,12 @@ final class UsageStore {
     private let celebrations: ResetCelebrationStore
     private var refreshTask: Task<Void, Never>?
     private let staleAfter: TimeInterval = 60
+    /// Cursor's dashboard API is undocumented and cookie-authenticated;
+    /// three calls every minute invites throttling, so reuse a recent result.
+    private let cursorQuotaMaxAge: TimeInterval = 5 * 60
+    private let liveQuotaMaxAge: TimeInterval = 5 * 60
+    private var codexLiveAttemptedAt: Date?
+    private let cursorEventStore = CursorEventStore()
 
     init(
         preferences: AppPreferences = AppPreferences(),
@@ -92,8 +98,31 @@ final class UsageStore {
                 } catch {
                     block = previousSnapshot?.activeBlock
                 }
-                let observedCodexQuota = await Task.detached { CodexQuotaReader.read() }.value
-                let codexQuota = observedCodexQuota ?? previousSnapshot?.codexQuota
+                // Codex limits, best source first: the CLI's app server (live
+                // from OpenAI, reused for a few minutes), then the newest
+                // session-log snapshot, then the last observed value.
+                // Attempts are spaced whether or not they succeed, so a Mac
+                // without a signed-in Codex CLI never spawns it every tick.
+                let codexQuota: CodexQuota?
+                let liveDue = codexLiveAttemptedAt.map { Date.now.timeIntervalSince($0) >= liveQuotaMaxAge } ?? true
+                if !liveDue, let previous = previousSnapshot?.codexQuota, previous.source == .live {
+                    codexQuota = previous
+                } else {
+                    var live: CodexQuota?
+                    if liveDue {
+                        codexLiveAttemptedAt = .now
+                        live = await Task.detached { CodexLiveQuota.fetch() }.value
+                    }
+                    if let live {
+                        codexQuota = live
+                    } else {
+                        // Keep the newest observation: an earlier live read
+                        // outranks an older session-log snapshot.
+                        let logged = await Task.detached { CodexQuotaReader.read() }.value
+                        codexQuota = [logged, previousSnapshot?.codexQuota].compactMap { $0 }
+                            .max { ($0.observedAt ?? .distantPast) < ($1.observedAt ?? .distantPast) }
+                    }
+                }
                 // Real Claude limits, best source first:
                 // 1. Live OAuth fetch — opt-in, because reading Claude Code's
                 //    Keychain item triggers a one-time macOS authorization
@@ -116,16 +145,29 @@ final class UsageStore {
                     claudeQuota = previous
                 }
                 // Cursor usage is opt-in: it reads Cursor's saved login and
-                // queries Cursor's undocumented usage API. Its failure keeps
-                // the last observed value.
+                // queries Cursor's undocumented dashboard API. Quota failure
+                // keeps the last observed value; event-history failure keeps
+                // the persisted history.
                 var cursorQuota: CursorQuota?
+                var cursorEvents: [CursorUsageEvent] = []
                 if preferences.cursorUsageEnabled {
-                    cursorQuota = (try? await CursorUsageFetcher.fetch())
-                        ?? previousSnapshot?.cursorQuota
+                    if let previous = previousSnapshot?.cursorQuota,
+                       Date.now.timeIntervalSince(previous.fetchedAt) < cursorQuotaMaxAge {
+                        cursorQuota = previous
+                    } else {
+                        cursorQuota = (try? await CursorUsageFetcher.fetch())
+                            ?? previousSnapshot?.cursorQuota
+                    }
+                    let cookie = await Task.detached { CursorUsageFetcher.sessionCookie() }.value
+                    cursorEvents = await cursorEventStore.refreshed { since, until in
+                        guard let cookie else { throw CursorUsageFetcher.CursorUsageError.noCredentials }
+                        return try await CursorUsageEventsFetcher.fetch(cookie: cookie, since: since, until: until)
+                    }
                 }
                 let fresh = UsageSnapshot(fetchedAt: .now, report: report,
                                           activeBlock: block, codexQuota: codexQuota,
-                                          claudeQuota: claudeQuota, cursorQuota: cursorQuota)
+                                          claudeQuota: claudeQuota, cursorQuota: cursorQuota,
+                                          cursorEvents: cursorEvents)
                 snapshot = fresh
                 state = .fresh
                 await cache.save(fresh)

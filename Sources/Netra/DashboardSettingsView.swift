@@ -1,95 +1,223 @@
 import AppKit
 import SwiftUI
 
+/// The categorized settings pages. Every control writes through to
+/// `AppPreferences` immediately, so the popover updates live.
 struct DashboardSettingsView: View {
+    var section: DashboardSection
     @Bindable var preferences: AppPreferences
     var store: UsageStore
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                menuBarSettings
-                providerSettings
-                limitSettings
-                alertSettings
-                generalSettings
+        DashboardPage {
+            DashboardPageHeader(section: section)
+            switch section {
+            case .menuBar: menuBarPage
+            case .limits: limitsPage
+            case .providers: providersPage
+            case .notifications: notificationsPage
+            default: generalPage
             }
-            .padding(24)
-            .frame(maxWidth: 820)
-            .frame(maxWidth: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle("Settings")
+        .navigationTitle(section.title)
         .onChange(of: preferences.claudeQuotaEnabled) { _, enabled in
-            // Fetch (or drop) the real quota right away so the limits UI
-            // reflects the choice without waiting for the next timer tick.
+            // Fetch the real quota right away so the choice shows without
+            // waiting for the next timer tick.
             if enabled { Task { await store.refresh() } }
         }
         .onChange(of: preferences.cursorUsageEnabled) { _, enabled in
             if enabled { Task { await store.refresh() } }
         }
-        .task {
-            while !Task.isCancelled {
-                await preferences.refreshNotificationAuthorization()
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Make Netra yours")
-                .font(.system(size: 26, weight: .semibold, design: .rounded))
-            Text("Choose what stays glanceable and when usage needs your attention.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    // MARK: Menu bar & popover
 
-    private var menuBarSettings: some View {
-        DashboardPanel(title: "Menu bar", detail: "Controls the compact status surface") {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Menu-bar label")
-                        .font(.system(size: 12, weight: .medium))
-                    Picker("Menu-bar label", selection: $preferences.menuBarDisplayMode) {
-                        ForEach(MenuBarDisplayMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
+    private var menuBarPage: some View {
+        Group {
+            DashboardPanel(title: "Menu-bar label", detail: "Shown next to Netra's icon", symbol: "menubar.arrow.up.rectangle") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                    ForEach(MenuBarDisplayMode.allCases) { mode in
+                        menuBarModeCard(mode)
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: 320)
-                    Text(preferences.menuBarDisplayMode.detail)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
                 }
-                Divider()
-                settingsToggle(
-                    "Provider limits",
-                    detail: "Show current capacity and reset timing when a source is available.",
-                    isOn: $preferences.showsLimits
-                )
-                settingsToggle(
-                    "Provider breakdown",
-                    detail: "Show each coding agent's share of cost and processed tokens.",
-                    isOn: $preferences.showsProviderBreakdown
-                )
-                settingsToggle(
-                    "Activity chart",
-                    detail: "Show the compact recent-usage chart in the popover.",
-                    isOn: $preferences.showsActivityChart
-                )
-                settingsToggle(
-                    "Keep Awake",
-                    detail: "Keep the sleep control available at the bottom of the popover.",
-                    isOn: $preferences.showsKeepAwake
+                Text(preferences.menuBarDisplayMode.detail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            DashboardPanel(title: "Popover sections", detail: "Top to bottom", symbol: "rectangle.stack") {
+                VStack(alignment: .leading, spacing: 14) {
+                    SettingsRow("Subscription limits", detail: "Plan windows, resets, and pace for each provider.", isOn: $preferences.showsLimits)
+                    Divider()
+                    SettingsRow("Activity chart", detail: "Recent usage, stacked by provider. Click a bar to pin a period.", isOn: $preferences.showsActivityChart)
+                    Divider()
+                    SettingsRow("Provider breakdown", detail: "Cost and tokens per agent. Hover one to see its models.", isOn: $preferences.showsProviderBreakdown)
+                    Divider()
+                    SettingsRow("Keep Awake control", detail: "Block idle sleep for 1h, 4h, or until turned off.", isOn: $preferences.showsKeepAwake)
+                    Divider()
+                    SettingsRow(title: "Opens on", detail: "The usage period the popover shows first.") {
+                        Picker("Opens on", selection: $preferences.defaultPeriod) {
+                            ForEach(PeriodTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(width: 200)
+                    }
+                }
+            }
+        }
+    }
+
+    private func menuBarModeCard(_ mode: MenuBarDisplayMode) -> some View {
+        let selected = preferences.menuBarDisplayMode == mode
+        return Button {
+            preferences.menuBarDisplayMode = mode
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 5) {
+                    menuBarPreviewIcon(mode)
+                    if let text = previewText(mode) {
+                        Text(text)
+                            .font(.system(size: 12, weight: .medium))
+                            .monospacedDigit()
+                    }
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(.quaternary.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
+                Text(mode.title)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                selected ? Color.accentColor.opacity(0.12) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(selected ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: selected ? 1.5 : 0.5)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private func menuBarPreviewIcon(_ mode: MenuBarDisplayMode) -> some View {
+        if mode == .limitBars {
+            Image(nsImage: MenuBarIcon.bars(top: 0.35, bottom: 0.7, awake: false))
+        } else {
+            Image(systemName: "eye")
+        }
+    }
+
+    private func previewText(_ mode: MenuBarDisplayMode) -> String? {
+        let today = store.snapshot?.currentRow(for: .today)
+        switch mode {
+        case .iconOnly, .limitBars: return nil
+        case .todayCost: return Format.cost(today?.cost ?? 12.5)
+        case .todayTokens: return Format.tokens(today?.totalTokens ?? 4_200_000)
+        case .highestProviderLimit:
+            let highest = store.snapshot?
+                .providerLimits(order: preferences.orderedLimitProviders)
+                .compactMap(\.mostConstrained?.usedPercent).max()
+            return "\(Int((highest ?? 54).rounded()))%"
+        }
+    }
+
+    // MARK: Limits
+
+    private var limitsPage: some View {
+        Group {
+            DashboardPanel(title: "Preview", detail: "Updates as you change options", symbol: "eye") {
+                limitPreview
+            }
+            DashboardPanel(title: "Display", symbol: "slider.horizontal.3") {
+                VStack(alignment: .leading, spacing: 14) {
+                    SettingsRow(title: "Bars show", detail: "Fill limit bars with what you've used, or with what's left.") {
+                        Picker("Bars show", selection: $preferences.barsShowRemaining) {
+                            Text("Used").tag(false)
+                            Text("Remaining").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(width: 200)
+                    }
+                    Divider()
+                    SettingsRow(title: "Reset times", detail: "A countdown, or the date and time the window resets.") {
+                        Picker("Reset times", selection: $preferences.resetTimeStyle) {
+                            ForEach(ResetTimeStyle.allCases) { Text($0.title).tag($0) }
+                        }
+                        .labelsHidden()
+                        .frame(width: 240)
+                    }
+                    Divider()
+                    SettingsRow(
+                        "Pace",
+                        detail: "Compare each window with an even burn to its reset. A tick marks where even pace would be, and Netra warns when you'd run out early.",
+                        isOn: $preferences.showsPace
+                    )
+                }
+            }
+            DashboardPanel(title: "Order", detail: "Top to bottom in the popover", symbol: "arrow.up.arrow.down") {
+                VStack(spacing: 0) {
+                    let order = preferences.orderedLimitProviders
+                    ForEach(Array(order.enumerated()), id: \.element) { index, provider in
+                        HStack(spacing: 10) {
+                            Text("\(index + 1)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 14)
+                            Circle().fill(AgentPalette.color(for: provider)).frame(width: 9, height: 9)
+                            Text(AgentPalette.shortName(provider))
+                                .font(.system(size: 12.5))
+                            Spacer()
+                            Button { preferences.moveLimitProvider(provider, by: -1) } label: {
+                                Image(systemName: "chevron.up")
+                            }
+                            .disabled(index == 0)
+                            .help("Move up")
+                            Button { preferences.moveLimitProvider(provider, by: 1) } label: {
+                                Image(systemName: "chevron.down")
+                            }
+                            .disabled(index == order.count - 1)
+                            .help("Move down")
+                        }
+                        .buttonStyle(.borderless)
+                        .padding(.vertical, 8)
+                        if index < order.count - 1 { Divider() }
+                    }
+                }
+            }
+            DashboardPanel(title: "Claude source", detail: "Where Claude's numbers come from", symbol: "key") {
+                SettingsRow(
+                    "Live Claude limits",
+                    detail: "Netra already shows the real limits Claude Code last cached — no setup needed. Turn this on to fetch fresh numbers from Anthropic on every refresh, using the sign-in Claude Code already has. macOS asks once to allow Keychain access; the token is only sent to api.anthropic.com.",
+                    isOn: $preferences.claudeQuotaEnabled
                 )
             }
         }
     }
+
+    /// A sample window rendered exactly as the popover will render it.
+    private var limitPreview: some View {
+        let sample = QuotaWindow(
+            label: "weekly", usedPercent: 62,
+            resetsAt: .now.addingTimeInterval(2 * 86400 + 4 * 3600),
+            durationSeconds: 7 * 86400
+        )
+        return LimitWindowRow(
+            window: sample, agent: "claude",
+            showRemaining: preferences.barsShowRemaining,
+            showsPace: preferences.showsPace,
+            resetStyle: preferences.resetTimeStyle
+        )
+        .frame(maxWidth: 360)
+    }
+
+    // MARK: Providers
 
     /// Every provider Netra has seen usage for (plus any that are currently
     /// hidden, so they can always be re-enabled), ranked by recent cost.
@@ -104,55 +232,44 @@ struct DashboardSettingsView: View {
         return ranked
     }
 
-    private var providerSettings: some View {
-        DashboardPanel(
-            title: "Providers",
-            detail: "What appears in the menu popover"
-        ) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Choose which providers appear in the menu-bar popover. Hidden providers are removed from its totals, chart, and list — the dashboard keeps showing them.")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 8)
-                if knownProviders.isEmpty {
-                    Text("No provider usage detected yet. Run a coding agent once and refresh.")
+    private var providersPage: some View {
+        Group {
+            DashboardPanel(title: "Account connections", detail: "Opt-in", symbol: "link") {
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsRow(
+                        title: "Cursor",
+                        detail: "Reads the login Cursor saved on this Mac and asks Cursor's dashboard API for your limits and per-request usage history — every Cursor surface on every machine, priced at Cursor's API rates. Synced every 15 minutes into Netra's app-support folder. The login is only sent to cursor.com; the endpoints are undocumented and can change. Off means Netra reads nothing from Cursor."
+                    ) {
+                        HStack(spacing: 8) {
+                            Circle().fill(AgentPalette.color(for: "cursor")).frame(width: 9, height: 9)
+                            SettingsSwitch(title: "Cursor usage", isOn: $preferences.cursorUsageEnabled)
+                        }
+                    }
+                    Divider()
+                    Label("Claude and Codex need no setup: Netra reads Claude Code's cached limits and asks the Codex CLI for live limits.", systemImage: "checkmark.seal")
                         .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                } else {
-                    ForEach(knownProviders, id: \.self) { provider in
+                        .foregroundStyle(.secondary)
+                }
+            }
+            DashboardPanel(title: "Shown in the popover", detail: "The dashboard always shows everything", symbol: "eye") {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Hidden providers are removed from the popover's totals, chart, list, and limit cards, so its numbers stay consistent.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 10)
+                    if knownProviders.isEmpty {
+                        Text("No provider usage detected yet. Run a coding agent once and refresh.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(knownProviders.enumerated()), id: \.element) { index, provider in
                         providerVisibilityRow(provider)
-                        Divider().padding(.vertical, 4)
+                            .padding(.vertical, 8)
+                        if index < knownProviders.count - 1 { Divider() }
                     }
                 }
-                cursorProviderRow
             }
-        }
-    }
-
-    /// Cursor is a provider too, but it has no local usage data — so its row
-    /// is an opt-in that turns the Cursor account fetch on, rather than a
-    /// menu-visibility switch like the local providers above.
-    private var cursorProviderRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Circle()
-                .fill(AgentPalette.color(for: "cursor"))
-                .frame(width: 8, height: 8)
-                .padding(.top, 3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Cursor")
-                    .font(.system(size: 12, weight: .medium))
-                Text("Cursor keeps no usage on local disk, so Netra reads the login Cursor already saved on this Mac and queries Cursor's own usage API (included, API, Auto, and Grok Bot windows). The login is sent only to cursor.com; this uses an undocumented endpoint that can change. Off means Netra reads nothing from Cursor.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 8)
-            Toggle("Cursor usage", isOn: $preferences.cursorUsageEnabled)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
-                .padding(.top, 1)
         }
     }
 
@@ -160,110 +277,86 @@ struct DashboardSettingsView: View {
         HStack(spacing: 10) {
             Circle()
                 .fill(AgentPalette.color(for: provider))
-                .frame(width: 8, height: 8)
+                .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 1) {
                 Text(AgentPalette.displayName(provider))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                 if provider == "other" {
                     Text("Usage ccusage couldn't attribute to a specific agent")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
                 }
             }
             Spacer()
-            Text(providerPeriodCost(provider))
-                .font(.system(size: 11, design: .monospaced))
+            Text(providerMonthCost(provider))
+                .font(.system(size: 11.5))
+                .monospacedDigit()
                 .foregroundStyle(.secondary)
-            Toggle(
-                "Show \(AgentPalette.displayName(provider)) in the menu popover",
+            SettingsSwitch(
+                title: "Show \(AgentPalette.displayName(provider)) in the menu popover",
                 isOn: Binding(
                     get: { preferences.isProviderVisibleInMenu(provider) },
                     set: { preferences.setProvider(provider, visibleInMenu: $0) }
                 )
             )
-            .toggleStyle(.switch)
             .controlSize(.small)
-            .labelsHidden()
         }
     }
 
-    private func providerPeriodCost(_ provider: String) -> String {
+    private func providerMonthCost(_ provider: String) -> String {
         guard let row = store.snapshot?.currentRow(for: .month) else { return "" }
-        if provider == "other" {
-            guard let other = row.unattributed else { return "" }
-            return "\(Format.cost(other.cost)) this month"
-        }
-        guard let stat = row.agentStat(provider) else { return "" }
-        return "\(Format.cost(stat.cost)) this month"
+        let stat = provider == "other" ? row.unattributed : row.agentStat(provider)
+        guard let stat else { return "" }
+        return "\(Format.providerCost(provider, cost: stat.cost, tokens: stat.totalTokens)) this month"
     }
 
-    private var limitSettings: some View {
-        DashboardPanel(title: "Claude limits", detail: "Where Claude's numbers come from") {
-            VStack(alignment: .leading, spacing: 12) {
-                settingsToggle(
-                    "Live Claude limits",
-                    detail: "Netra already shows the real limits Claude Code last cached — no setup needed. Turn this on to fetch fresh numbers straight from Anthropic on every refresh, using the sign-in Claude Code already has. macOS will ask once to allow Keychain access — choose “Always Allow”. The token is only ever sent to api.anthropic.com.",
-                    isOn: $preferences.claudeQuotaEnabled
-                )
-                Label(
-                    "Claude limits come from Anthropic (live, or via Claude Code's cache). Codex limits are read from its local session logs. Only when neither is available does Claude fall back to a clearly-labelled local estimate.",
-                    systemImage: "gauge.with.needle"
-                )
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
+    // MARK: Notifications
+
+    private var notificationsPage: some View {
+        Group {
+            DashboardPanel(title: "Permission", symbol: "bell") {
+                notificationPermissionStatus
+                    .font(.system(size: 11.5))
+            }
+            DashboardPanel(title: "Alerts", detail: "Checked after every successful refresh", symbol: "bell.badge") {
+                VStack(alignment: .leading, spacing: 16) {
+                    SettingsRow(
+                        title: "Limit alert",
+                        detail: "Notify when any provider-reported window (Claude, Codex, Cursor) — or Claude's local historical-peak estimate — reaches this level. Once per crossing."
+                    ) {
+                        HStack(spacing: 8) {
+                            TextField("Percent", value: $preferences.providerLimitAlertThreshold, format: .number.precision(.fractionLength(0)))
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 56)
+                                .disabled(!preferences.providerLimitAlertEnabled)
+                            Text("%").foregroundStyle(.secondary)
+                            SettingsSwitch(title: "Limit alert", isOn: $preferences.providerLimitAlertEnabled)
+                        }
+                    }
+                    Divider()
+                    SettingsRow(
+                        title: "Daily token alert",
+                        detail: "Notify when today's processed tokens across every provider pass this amount."
+                    ) {
+                        HStack(spacing: 8) {
+                            TextField("Tokens", value: $preferences.dailyTokenAlertThreshold, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 110)
+                                .disabled(!preferences.dailyTokenAlertEnabled)
+                            Text("tokens").foregroundStyle(.secondary)
+                            SettingsSwitch(title: "Daily token alert", isOn: $preferences.dailyTokenAlertEnabled)
+                        }
+                    }
+                }
             }
         }
-    }
-
-    private var alertSettings: some View {
-        DashboardPanel(title: "Alerts", detail: "Evaluated after each successful local refresh") {
-            VStack(alignment: .leading, spacing: 18) {
-                notificationPermissionStatus
-                alertToggle(
-                    title: "Daily token alert",
-                    detail: "Notify when combined processed tokens for today pass this amount.",
-                    isOn: $preferences.dailyTokenAlertEnabled
-                ) {
-                    HStack(spacing: 6) {
-                        TextField(
-                            "Token threshold",
-                            value: $preferences.dailyTokenAlertThreshold,
-                            format: .number
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 110)
-                        Text("tokens")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.system(size: 11))
-                }
-                Divider()
-                alertToggle(
-                    title: "Usage indicator alert",
-                    detail: "Notify when a provider-reported limit (Codex, and Claude when real limits are enabled) or Claude's local historical-peak estimate reaches this level.",
-                    isOn: $preferences.providerLimitAlertEnabled
-                ) {
-                    HStack(spacing: 4) {
-                        TextField(
-                            "Percent threshold",
-                            value: $preferences.providerLimitAlertThreshold,
-                            format: .number.precision(.fractionLength(0))
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 70)
-                        Text("%")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.system(size: 11))
-                }
-                Label(
-                    "Provider-reported percentages are real limits. Claude's local estimate is percent of your own historical peak—not subscription capacity. Netra alerts once per threshold crossing.",
-                    systemImage: "bell.badge"
-                )
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
+        .task {
+            // Permission can change in System Settings while this page is open.
+            while !Task.isCancelled {
+                await preferences.refreshNotificationAuthorization()
+                try? await Task.sleep(for: .seconds(2))
             }
         }
     }
@@ -272,21 +365,15 @@ struct DashboardSettingsView: View {
     private var notificationPermissionStatus: some View {
         switch preferences.notificationAuthorizationState {
         case .checking:
-            Label("Checking notification permission…", systemImage: "bell")
+            Label("Checking notification permission…", systemImage: "hourglass")
                 .foregroundStyle(.secondary)
         case .notDetermined:
-            Label(
-                "Notification permission has not been requested. Netra will ask after the next successful refresh while an alert is enabled.",
-                systemImage: "bell.badge"
-            )
-            .foregroundStyle(.secondary)
+            Label("Netra will ask for permission after the next refresh while an alert is on.", systemImage: "questionmark.circle")
+                .foregroundStyle(.secondary)
         case .denied:
-            HStack(alignment: .center, spacing: 12) {
-                Label(
-                    "Notifications are blocked, so enabled alerts cannot appear.",
-                    systemImage: "bell.slash"
-                )
-                .foregroundStyle(.red)
+            HStack(spacing: 12) {
+                Label("Notifications are blocked, so alerts can't appear.", systemImage: "bell.slash")
+                    .foregroundStyle(.red)
                 Spacer()
                 Button("Open Notification Settings") {
                     guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") else { return }
@@ -294,15 +381,17 @@ struct DashboardSettingsView: View {
                 }
             }
         case .allowed:
-            Label("Notifications are allowed for Netra.", systemImage: "checkmark.circle")
-                .foregroundStyle(.secondary)
+            Label("Notifications are allowed for Netra.", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
         }
     }
 
-    private var generalSettings: some View {
-        DashboardPanel(title: "General") {
-            VStack(alignment: .leading, spacing: 14) {
-                settingsToggle(
+    // MARK: General
+
+    private var generalPage: some View {
+        Group {
+            DashboardPanel(title: "Startup", symbol: "power") {
+                SettingsRow(
                     "Launch at login",
                     detail: LaunchAtLogin.isAvailable
                         ? "Start Netra automatically after you sign in to this Mac."
@@ -314,50 +403,20 @@ struct DashboardSettingsView: View {
                     LaunchAtLogin.set(enabled)
                     launchAtLogin = LaunchAtLogin.isEnabled
                 }
-                Divider()
-                settingsToggle(
+            }
+            DashboardPanel(title: "Celebrations", symbol: "party.popper") {
+                SettingsRow(
                     "Celebrate limit resets",
-                    detail: "Throw full-screen confetti the moment any subscription limit resets — 5-hour, weekly, or monthly — and fresh capacity is back. The overlay is click-through and never steals focus.",
+                    detail: "Full-screen confetti the moment a subscription window resets and fresh capacity is back. Click-through; never steals focus.",
                     isOn: $preferences.confettiOnReset
                 )
             }
-        }
-    }
-
-    private func settingsToggle(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                Text(detail)
-                    .font(.system(size: 10.5))
+            DashboardPanel(title: "About your data", symbol: "lock.shield") {
+                Label("Usage is calculated on this Mac from coding-agent logs by a pinned ccusage build. Limits come from each provider (Anthropic via Claude Code, OpenAI via the Codex CLI, and Cursor when connected). Transcript contents never leave this Mac.", systemImage: "info.circle")
+                    .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-        .toggleStyle(.switch)
-    }
-
-    private func alertToggle<Accessory: View>(
-        title: String,
-        detail: String,
-        isOn: Binding<Bool>,
-        @ViewBuilder accessory: () -> Accessory
-    ) -> some View {
-        HStack(alignment: .center, spacing: 16) {
-            Toggle(isOn: isOn) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .medium))
-                    Text(detail)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch)
-            Spacer()
-            accessory()
-                .disabled(!isOn.wrappedValue)
         }
     }
 }

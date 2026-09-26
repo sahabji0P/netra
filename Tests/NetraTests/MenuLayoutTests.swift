@@ -30,7 +30,7 @@ final class MenuLayoutTests: XCTestCase {
         let hostingView = NSHostingView(rootView: root)
         let size = hostingView.fittingSize
 
-        XCTAssertEqual(size.width, 340, accuracy: 1)
+        XCTAssertEqual(size.width, MenuView.width, accuracy: 1)
         XCTAssertGreaterThan(size.height, 300)
         XCTAssertLessThanOrEqual(size.height, NSScreen.main?.visibleFrame.height ?? 900)
     }
