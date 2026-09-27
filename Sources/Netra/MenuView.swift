@@ -144,18 +144,21 @@ struct MenuView: View {
     /// Static sizing: the popover takes its content's natural height when
     /// that fits the screen, and only scrolls when it does not. (Measuring
     /// the content and feeding the height back into the frame left the
-    /// window stuck at its initial height on some Macs.)
+    /// window stuck at its initial height on some Macs; a flexible
+    /// `.frame(maxHeight:)` grew to fill the window's large proposal and
+    /// centered short content in blank space.)
     private var scrollingBody: some View {
-        ViewThatFits(in: .vertical) {
-            menuContent
-            ScrollView(.vertical) {
+        HeightCappedLayout(maxHeight: maximumPopoverHeight) {
+            ViewThatFits(in: .vertical) {
                 menuContent
+                ScrollView(.vertical) {
+                    menuContent
+                }
+                .scrollIndicators(.hidden)
+                .frame(height: maximumPopoverHeight)
             }
-            .scrollIndicators(.hidden)
-            .frame(height: maximumPopoverHeight)
         }
         .frame(width: Self.width)
-        .frame(maxHeight: maximumPopoverHeight)
         .onAppear {
             // Netra is a menu-bar-only app, so it is not active when the
             // popover opens, and SwiftUI does not deliver hover to an
@@ -166,6 +169,13 @@ struct MenuView: View {
                 appliedDefaultPeriod = true
             }
             store.refreshIfStale()
+        }
+        .onDisappear {
+            // Closing the popover mid-hover never delivers the hover's end;
+            // clear it so a reopen doesn't show a stale bar or side panel.
+            hoveredPeriod = nil
+            panelHoverTask?.cancel()
+            panelTarget = nil
         }
     }
 
@@ -613,5 +623,28 @@ struct MenuView: View {
         @unknown default:
             break
         }
+    }
+}
+
+/// Offers its child exactly `maxHeight` but reports the child's own size,
+/// so the popover hugs short content instead of filling the proposal the
+/// menu-bar window offers.
+struct HeightCappedLayout: Layout {
+    var maxHeight: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        return child.sizeThatFits(cappedProposal(proposal))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: cappedProposal(proposal))
+    }
+
+    /// Always offer the full cap, whatever the host proposes: a small or
+    /// zero minimum-size probe would otherwise make `ViewThatFits` pick the
+    /// cap-height scroll view and pin the window at its tallest.
+    private func cappedProposal(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(width: proposal.width, height: maxHeight)
     }
 }
