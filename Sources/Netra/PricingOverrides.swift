@@ -46,13 +46,16 @@ enum PricingOverrides {
         return names.sorted()
     }
 
-    /// Makes sure overrides exist for `models`, fetching LiteLLM pricing when
+    /// Makes sure overrides exist for `keys`, fetching LiteLLM pricing when
     /// needed. Returns true when new overrides were written — the caller
     /// should then re-run the scan so the numbers correct themselves now
     /// rather than on the next refresh.
-    static func ensure(for models: [String]) async -> Bool {
+    /// Each override key is priced as a (possibly different) canonical
+    /// model: `["openai/gpt-5.6-sol": "gpt-5.6-sol"]` writes the bare model's
+    /// list price under the prefixed key ccusage looks up.
+    static func ensure(keys: [String: String]) async -> Bool {
         let existing = currentOverrides()
-        var missing = models.filter { existing[$0] == nil }
+        var missing = keys.keys.filter { existing[$0] == nil }.sorted()
         guard !missing.isEmpty else { return false }
 
         // Don't hammer LiteLLM for models it didn't have last time we looked.
@@ -64,13 +67,13 @@ enum PricingOverrides {
         guard let table = await fetchLiteLLM() else { return false }
         var overrides = existing
         var added = false
-        for model in missing {
-            if let priced = pricing(for: model, in: table) {
-                overrides[model] = priced
+        for key in missing {
+            if let priced = pricing(for: keys[key] ?? key, in: table) {
+                overrides[key] = priced
                 added = true
-                log.info("priced \(model, privacy: .public) from LiteLLM")
+                log.info("priced \(key, privacy: .public) from LiteLLM")
             } else {
-                log.info("no LiteLLM pricing for \(model, privacy: .public); stays $0")
+                log.info("no LiteLLM pricing for \(key, privacy: .public); stays $0")
             }
         }
         guard added else { return false }
@@ -80,7 +83,7 @@ enum PricingOverrides {
 
     // MARK: LiteLLM lookup
 
-    private static func fetchLiteLLM() async -> [String: Any]? {
+    static func fetchLiteLLM() async -> [String: Any]? {
         var request = URLRequest(url: litellmURL)
         request.timeoutInterval = 30
         guard let (data, response) = try? await URLSession.shared.data(for: request),

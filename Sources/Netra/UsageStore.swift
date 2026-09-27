@@ -39,6 +39,8 @@ final class UsageStore {
     /// show that prompt; `authorizeClaudeKeychain()` does, once, on request.
     private(set) var claudeKeychainNeedsApproval = false
     private var claudeKeychainPromptRequested = false
+    /// ccusage costs far from list price, from the latest refresh.
+    private(set) var pricingFindings: [PricingAudit.Finding] = []
     /// Invoked (on the main actor) the moment a limit reset is detected, so the
     /// app can celebrate immediately — independent of whether the popover is
     /// open. Set by the composition root; nil in tests.
@@ -88,11 +90,14 @@ final class UsageStore {
             do {
                 var report = try await client.fetchReport()
                 // Models absent from ccusage's offline pricing table come back
-                // costed $0; pull their real pricing once and rescan.
-                let unpriced = PricingOverrides.unpricedModels(in: report)
-                if !unpriced.isEmpty, await PricingOverrides.ensure(for: unpriced) {
+                // costed $0, and Hermes' OpenAI sessions hit a mis-routed
+                // price; pull real list pricing once and rescan.
+                var overrideKeys = PricingAudit.hermesRoutingKeys(in: report)
+                for model in PricingOverrides.unpricedModels(in: report) { overrideKeys[model] = model }
+                if !overrideKeys.isEmpty, await PricingOverrides.ensure(keys: overrideKeys) {
                     report = try await client.fetchReport()
                 }
+                auditPricing(of: report)
                 // Block and quota data are bonuses — their failure must not fail the refresh.
                 // Keep the last observed values when a secondary reader fails;
                 // a successful "no active block" result still clears that value.
@@ -217,6 +222,19 @@ final class UsageStore {
         celebrations.setAcknowledged(acknowledged)
         guard let celebration else { return }
         celebrationHandler?(celebration)
+    }
+
+    /// Flags model-months whose cost is far from tokens × list price. Runs
+    /// beside the refresh and never blocks or fails it; findings are logged
+    /// once when they change.
+    private func auditPricing(of report: CCUnifiedReport) {
+        Task { [weak self] in
+            let prices = await PricingAudit.referencePrices(for: report)
+            let findings = PricingAudit.findings(in: report, prices: prices)
+            guard let self, findings != pricingFindings else { return }
+            PricingAudit.log(findings)
+            pricingFindings = findings
+        }
     }
 
     /// The user asked for live Claude limits: refresh with the Keychain

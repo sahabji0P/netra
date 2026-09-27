@@ -116,7 +116,12 @@ own heaviest recent block).
 Settings also controls the menu-bar label, which sections appear in the
 popover, and optional daily-token or usage-indicator alerts. macOS
 notification permission is requested only after an alert is enabled.
-Equivalent API cost is an estimate, not subscription spend.
+Equivalent API cost is an estimate, not subscription spend. Models missing
+from ccusage's offline price table, and Hermes sessions billed through OpenAI
+(which ccusage 20.0.24 prices at the wrong rate), get LiteLLM list-price
+overrides fetched once. Each refresh also compares every model-month against
+tokens × list price (a weekly-refreshed LiteLLM snapshot) and logs any cost
+more than 25% below or 2.5× above it under the `pricing` log category.
 
 **Lock & Sleep** locks the screen immediately and puts the Mac to sleep.
 **Keep awake** blocks idle sleep only — the display still sleeps, and closing
