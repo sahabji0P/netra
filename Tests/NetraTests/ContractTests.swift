@@ -206,6 +206,31 @@ final class ContractTests: XCTestCase {
         }
     }
 
+    func testKeychainCredentialsCarryExpiryForInMemoryReuse() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func credentials(expiringIn seconds: TimeInterval) throws -> ClaudeQuotaFetcher.Credentials {
+            let expiresAt = (now.timeIntervalSince1970 + seconds) * 1000
+            let json = #"{"claudeAiOauth":{"accessToken":"synthetic-test-token","expiresAt":\#(expiresAt)}}"#
+            return try ClaudeQuotaFetcher.credentials(fromKeychainData: Data(json.utf8), now: now)
+        }
+        XCTAssertTrue(ClaudeQuotaFetcher.isReusable(try credentials(expiringIn: 3600), now: now))
+        // Within five minutes of expiry the Keychain is read again.
+        XCTAssertFalse(ClaudeQuotaFetcher.isReusable(try credentials(expiringIn: 120), now: now))
+        let undated = ClaudeQuotaFetcher.Credentials(accessToken: "synthetic", subscriptionType: nil, expiresAt: nil)
+        XCTAssertFalse(ClaudeQuotaFetcher.isReusable(undated, now: now))
+    }
+
+    func testKeychainConsentStatusesNeedApprovalInsteadOfRetrying() {
+        for status in [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled, errSecNoAccessForItem] {
+            guard case .keychainNeedsApproval = ClaudeQuotaFetcher.keychainError(for: status) else {
+                return XCTFail("status \(status) should need approval")
+            }
+        }
+        guard case .keychain(errSecItemNotFound) = ClaudeQuotaFetcher.keychainError(for: errSecItemNotFound) else {
+            return XCTFail("a missing item is not a consent problem")
+        }
+    }
+
     func testKeychainCredentialsGarbageThrows() {
         XCTAssertThrowsError(try ClaudeQuotaFetcher.credentials(fromKeychainData: Data("not json".utf8)))
     }

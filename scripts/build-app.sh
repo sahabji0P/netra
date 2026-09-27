@@ -41,6 +41,11 @@ PLIST
 # Sign the nested helper first, then the bundle (required nesting order).
 IDENTITY="${NETRA_SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
   | awk -F'"' '/Developer ID Application|Apple Development/{print $2; exit}')}"
+if [[ -z "$IDENTITY" ]]; then
+  # An ad-hoc signature is a new identity on every build, so macOS forgets
+  # "Always Allow" for Claude Code's Keychain item and asks again.
+  echo "warning: no signing identity found; signing ad-hoc (Keychain grants will not persist across builds)" >&2
+fi
 codesign --force --options runtime --sign "${IDENTITY:--}" "$APP/Contents/Resources/ccusage-bin"
 codesign --force --options runtime --sign "${IDENTITY:--}" "$APP"
 

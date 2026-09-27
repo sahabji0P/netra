@@ -32,6 +32,9 @@ extension MenuView {
               !limitCards.contains(where: { $0.agent == "claude" }),
               (snapshot.currentRow(for: .week).agentStat("claude")?.totalTokens ?? 0) > 0
         else { return nil }
+        if preferences.claudeQuotaEnabled, store.claudeKeychainNeedsApproval {
+            return "Netra needs your permission to read Claude Code's sign-in from the Keychain. Choose \u{201C}Always Allow\u{201D} so macOS doesn't ask again."
+        }
         if preferences.claudeQuotaEnabled {
             return "Couldn't get live limits from Anthropic. Make sure Claude Code is signed in with your Claude account."
         }
@@ -60,13 +63,13 @@ extension MenuView {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if !preferences.claudeQuotaEnabled {
-                Button("Use live limits from Anthropic") {
+            if !preferences.claudeQuotaEnabled || store.claudeKeychainNeedsApproval {
+                Button(preferences.claudeQuotaEnabled ? "Allow Keychain access" : "Use live limits from Anthropic") {
                     preferences.claudeQuotaEnabled = true
-                    Task { await store.refresh() }
+                    Task { await store.authorizeClaudeKeychain() }
                 }
                 .controlSize(.small)
-                .help("Reads the sign-in Claude Code keeps in your Keychain (macOS asks once) and fetches your limits from api.anthropic.com.")
+                .help("Reads the sign-in Claude Code keeps in your Keychain and fetches your limits from api.anthropic.com. Choose \u{201C}Always Allow\u{201D} when macOS asks.")
             }
         }
     }

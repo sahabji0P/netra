@@ -23,8 +23,9 @@ struct DashboardSettingsView: View {
         .navigationTitle(section.title)
         .onChange(of: preferences.claudeQuotaEnabled) { _, enabled in
             // Fetch the real quota right away so the choice shows without
-            // waiting for the next timer tick.
-            if enabled { Task { await store.refresh() } }
+            // waiting for the next timer tick; this user action is the one
+            // place macOS may ask for Keychain access.
+            if enabled { Task { await store.authorizeClaudeKeychain() } }
         }
         .onChange(of: preferences.cursorUsageEnabled) { _, enabled in
             if enabled { Task { await store.refresh() } }
@@ -194,9 +195,21 @@ struct DashboardSettingsView: View {
             DashboardPanel(title: "Claude source", detail: "Where Claude's numbers come from", symbol: "key") {
                 SettingsRow(
                     "Live Claude limits",
-                    detail: "Netra already shows the real limits Claude Code last cached — no setup needed. Turn this on to fetch fresh numbers from Anthropic on every refresh, using the sign-in Claude Code already has. macOS asks once to allow Keychain access; the token is only sent to api.anthropic.com.",
+                    detail: "Netra already shows the real limits Claude Code last cached — no setup needed. Turn this on to fetch fresh numbers from Anthropic on every refresh, using the sign-in Claude Code already has. macOS asks when you turn this on — choose \u{201C}Always Allow\u{201D}; background refreshes never prompt. The token stays in memory and is only sent to api.anthropic.com.",
                     isOn: $preferences.claudeQuotaEnabled
                 )
+                if preferences.claudeQuotaEnabled, store.claudeKeychainNeedsApproval {
+                    HStack(spacing: 10) {
+                        Label("Netra needs Keychain access to read Claude Code's sign-in.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                        Spacer()
+                        Button("Allow Keychain access") {
+                            Task { await store.authorizeClaudeKeychain() }
+                        }
+                        .controlSize(.small)
+                    }
+                }
             }
         }
     }

@@ -137,7 +137,7 @@ final class AppPreferences {
 
     /// Opt-in: fetch real Claude subscription limits with the OAuth token
     /// Claude Code keeps in the Keychain. Off by default because reading that
-    /// Keychain item triggers a one-time macOS authorization prompt.
+    /// Keychain item needs macOS consent (prompted only on user action).
     var claudeQuotaEnabled: Bool {
         didSet { defaults.set(claudeQuotaEnabled, forKey: Key.claudeQuotaEnabled) }
     }

@@ -34,6 +34,11 @@ final class UsageStore {
 
     private(set) var snapshot: UsageSnapshot?
     private(set) var state: State = .empty
+    /// Live Claude limits are on, but macOS needs the user's consent before
+    /// Netra may read Claude Code's Keychain item. Background refreshes never
+    /// show that prompt; `authorizeClaudeKeychain()` does, once, on request.
+    private(set) var claudeKeychainNeedsApproval = false
+    private var claudeKeychainPromptRequested = false
     /// Invoked (on the main actor) the moment a limit reset is detected, so the
     /// app can celebrate immediately — independent of whether the popover is
     /// open. Set by the composition root; nil in tests.
@@ -125,15 +130,27 @@ final class UsageStore {
                 }
                 // Real Claude limits, best source first:
                 // 1. Live OAuth fetch — opt-in, because reading Claude Code's
-                //    Keychain item triggers a one-time macOS authorization
-                //    prompt.
+                //    Keychain item needs macOS consent. Only a user action may
+                //    show that prompt; timer refreshes read silently.
                 // 2. Claude Code's own cached server response in ~/.claude.json
                 //    — real Anthropic percentages, no Keychain, no network.
                 // 3. The last observed quota (original fetchedAt preserved, so
                 //    the UI shows honest freshness).
                 var claudeQuota: ClaudeQuota?
                 if preferences.claudeQuotaEnabled {
-                    claudeQuota = try? await ClaudeQuotaFetcher.fetch()
+                    let allowingPrompt = claudeKeychainPromptRequested
+                    claudeKeychainPromptRequested = false
+                    do {
+                        claudeQuota = try await ClaudeQuotaFetcher.fetch(allowingPrompt: allowingPrompt)
+                        claudeKeychainNeedsApproval = false
+                    } catch ClaudeQuotaError.keychainNeedsApproval {
+                        claudeKeychainNeedsApproval = true
+                    } catch {
+                        // Network or token trouble is not a Keychain problem;
+                        // leave the approval state as last observed.
+                    }
+                } else {
+                    claudeKeychainNeedsApproval = false
                 }
                 if claudeQuota == nil {
                     claudeQuota = await Task.detached { ClaudeCachedQuotaReader.read() }.value
@@ -200,6 +217,14 @@ final class UsageStore {
         celebrations.setAcknowledged(acknowledged)
         guard let celebration else { return }
         celebrationHandler?(celebration)
+    }
+
+    /// The user asked for live Claude limits: refresh with the Keychain
+    /// prompt allowed, so macOS can ask for consent this one time.
+    func authorizeClaudeKeychain() async {
+        await refreshTask?.value
+        claudeKeychainPromptRequested = true
+        await refresh()
     }
 
     /// Called when the popover opens: refresh only if the data has gone stale.

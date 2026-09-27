@@ -1,4 +1,6 @@
 import Foundation
+import LocalAuthentication
+import os
 import Security
 
 /// Real Claude subscription limits, fetched from Anthropic's OAuth usage
@@ -92,6 +94,9 @@ struct ClaudeExtraUsage: Codable, Hashable, Sendable {
 
 enum ClaudeQuotaError: Error {
     case keychain(OSStatus)
+    /// macOS would have to ask before Netra may read Claude Code's
+    /// Keychain item; only a user action is allowed to trigger that prompt.
+    case keychainNeedsApproval
     case badCredentials
     case tokenExpired
     case http(Int)
@@ -99,8 +104,11 @@ enum ClaudeQuotaError: Error {
 }
 
 enum ClaudeQuotaFetcher {
-    static func fetch() async throws -> ClaudeQuota {
-        let credentials = try readCredentials()
+    /// Background refreshes pass `allowingPrompt: false`, so a missing or
+    /// one-time Keychain grant fails fast instead of showing a macOS
+    /// password dialog every minute. Only a user action allows the prompt.
+    static func fetch(allowingPrompt: Bool = false) async throws -> ClaudeQuota {
+        let credentials = try cachedCredentials() ?? readCredentials(allowingPrompt: allowingPrompt)
 
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
@@ -109,7 +117,11 @@ enum ClaudeQuotaFetcher {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ClaudeQuotaError.http(-1) }
-        guard http.statusCode == 200 else { throw ClaudeQuotaError.http(http.statusCode) }
+        guard http.statusCode == 200 else {
+            // A rejected token was rotated or revoked; read the current one next time.
+            if http.statusCode == 401 { credentialCache.withLock { $0 = nil } }
+            throw ClaudeQuotaError.http(http.statusCode)
+        }
 
         return try quota(fromResponse: data, subscriptionType: credentials.subscriptionType)
     }
@@ -131,24 +143,65 @@ enum ClaudeQuotaFetcher {
         )
     }
 
-    struct Credentials {
+    struct Credentials: Sendable {
         var accessToken: String
         var subscriptionType: String?
+        var expiresAt: Date?
     }
 
-    private static func readCredentials() throws -> Credentials {
-        let query: [String: Any] = [
+    /// The token stays in memory only (never persisted or logged), so the
+    /// Keychain is read once per token rather than on every refresh.
+    private static let credentialCache = OSAllocatedUnfairLock<Credentials?>(initialState: nil)
+
+    private static func cachedCredentials(now: Date = .now) -> Credentials? {
+        credentialCache.withLock { cached in
+            if let credentials = cached, !isReusable(credentials, now: now) { cached = nil }
+            return cached
+        }
+    }
+
+    /// Reuse a token until shortly before it expires; a token without an
+    /// expiry is re-read from the Keychain rather than trusted forever.
+    static func isReusable(_ credentials: Credentials, now: Date = .now) -> Bool {
+        guard let expiresAt = credentials.expiresAt else { return false }
+        return expiresAt.timeIntervalSince(now) > 5 * 60
+    }
+
+    private static func readCredentials(allowingPrompt: Bool) throws -> Credentials {
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
+        if !allowingPrompt {
+            // Both are needed: the LAContext flag covers authentication UI,
+            // and the UI-fail policy covers the login keychain's
+            // Allow/Deny access-control dialog.
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
+        }
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess, let data = item as? Data else {
-            throw ClaudeQuotaError.keychain(status)
+            throw keychainError(for: status)
         }
-        return try credentials(fromKeychainData: data)
+        let credentials = try credentials(fromKeychainData: data)
+        credentialCache.withLock { $0 = credentials }
+        return credentials
+    }
+
+    /// Statuses meaning "macOS wants the user's consent" (a silent read that
+    /// would have prompted, or a prompt the user cancelled or denied).
+    static func keychainError(for status: OSStatus) -> ClaudeQuotaError {
+        switch status {
+        case errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled, errSecNoAccessForItem:
+            .keychainNeedsApproval
+        default:
+            .keychain(status)
+        }
     }
 
     /// Parses the Keychain payload. Split out so the credential contract can
@@ -160,13 +213,14 @@ enum ClaudeQuotaFetcher {
             throw ClaudeQuotaError.badCredentials
         }
         // expiresAt is epoch milliseconds; Claude Code refreshes it whenever it runs.
-        if let expiresAt = oauth["expiresAt"] as? Double,
-           expiresAt / 1000 < now.timeIntervalSince1970 {
+        let expiresAt = JSONValue.number(oauth["expiresAt"]).map { Date(timeIntervalSince1970: $0 / 1000) }
+        if let expiresAt, expiresAt < now {
             throw ClaudeQuotaError.tokenExpired
         }
         return Credentials(
             accessToken: accessToken,
-            subscriptionType: oauth["subscriptionType"] as? String
+            subscriptionType: oauth["subscriptionType"] as? String,
+            expiresAt: expiresAt
         )
     }
 }
