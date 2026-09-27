@@ -2,7 +2,7 @@ import XCTest
 @testable import Netra
 
 /// Fixture tests for the external contracts Netra depends on, all of
-/// which can drift without notice: ccusage's JSON output (pinned 20.0.19),
+/// which can drift without notice: ccusage's JSON output (pinned 20.0.24),
 /// the Codex CLI rollout format, Anthropic's OAuth usage endpoint, and
 /// Cursor's undocumented dashboard usage API.
 final class ContractTests: XCTestCase {

@@ -15,6 +15,19 @@ VERSION="$1"
 TAP_DIR="${NETRA_TAP_DIR:-../homebrew-tap}"
 ZIP="dist/Netra-${VERSION}.zip"
 
+# Netra's numbers are only as good as the pinned ccusage; never ship on a
+# stale one by accident. Upgrading still needs contract verification
+# (swift test, including PinnedCCUsageTests) before this check passes.
+PINNED_CCUSAGE="$(./ccusage-bin --version | awk '{print $NF}')"
+LATEST_CCUSAGE="$(npm view @ccusage/ccusage-darwin-arm64 version 2>/dev/null || true)"
+if [[ -z "$LATEST_CCUSAGE" ]]; then
+  echo "⚠ Could not check npm for a newer ccusage (pinned ${PINNED_CCUSAGE})."
+elif [[ "$LATEST_CCUSAGE" != "$PINNED_CCUSAGE" && -z "$NETRA_ALLOW_OLD_CCUSAGE" ]]; then
+  echo "✋ ccusage ${LATEST_CCUSAGE} is available; ccusage-bin is pinned at ${PINNED_CCUSAGE}." >&2
+  echo "  Review its changelog, upgrade and re-verify, or set NETRA_ALLOW_OLD_CCUSAGE=1." >&2
+  exit 1
+fi
+
 scripts/build-app.sh "$VERSION"
 
 if [[ -n "$NETRA_NOTARY_PROFILE" ]]; then

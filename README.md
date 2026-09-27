@@ -161,6 +161,12 @@ scripts/release.sh 0.1.2      # zip → GitHub Release → bump Homebrew cask
 Developer membership); otherwise it releases un-notarized and users must clear
 quarantine with the `xattr` command above.
 
+Before publishing, `release.sh` checks npm for a newer
+`@ccusage/ccusage-darwin-arm64` and stops if `ccusage-bin` is behind. Review
+the ccusage changelog, replace the binary, and run `swift test` (which runs the
+pinned binary against synthetic logs in `PinnedCCUsageTests`) — or set
+`NETRA_ALLOW_OLD_CCUSAGE=1` to ship on the pinned version deliberately.
+
 ## Layout
 
 - `Sources/Netra/` — the app (SwiftUI `MenuBarExtra`, window-style popover)
@@ -172,7 +178,7 @@ quarantine with the `xattr` command above.
   - `AppPreferences.swift` / `UsageAlerts.swift` — persisted display choices and threshold notifications
   - `AwakeController.swift` — IOKit sleep assertion (manual/timed), lock & sleep
   - `MenuView.swift` / `LimitsViews.swift` / `LimitSummary.swift` — the popover UI and limit/pace text rules
-- `ccusage-bin` — pinned ccusage 20.0.19 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
+- `ccusage-bin` — pinned ccusage 20.0.24 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
 - `VERSION` — next app-bundle version used by local builds (publishing remains explicit)
 - `fixtures/` — captured real JSON output + benchmark notes
 

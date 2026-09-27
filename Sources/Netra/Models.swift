@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - ccusage JSON DTOs (schema pinned to ccusage 20.0.19 unified report)
+// MARK: - ccusage JSON DTOs (schema pinned to ccusage 20.0.24 unified report)
 
 struct CCUnifiedReport: Decodable {
     var daily: [CCRow]?
