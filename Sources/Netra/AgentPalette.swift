@@ -16,6 +16,7 @@ enum AgentPalette {
         case "pi": dynamic(light: 0xE87BA4, dark: 0xD55181)       // magenta
         case "copilot": dynamic(light: 0x008300, dark: 0x008300)  // green
         case "cursor": dynamic(light: 0x4A3AA7, dark: 0x9085E9)   // violet
+        case "cursor-grok-bot": dynamic(light: 0x8C80D8, dark: 0xC4BDF4) // pale violet: Cursor's Grok Bot
         case "hermes": dynamic(light: 0xE34948, dark: 0xE66767)   // red
         default: Color(nsColor: .systemGray)
         }
@@ -37,6 +38,7 @@ enum AgentPalette {
         case "pi": "Pi"
         case "copilot": "Copilot CLI"
         case "cursor": "Cursor"
+        case "cursor-grok-bot": "Cursor Grok Bot"
         case "hermes": "Hermes"
         case "droid": "Droid"
         case "amp": "Amp"
@@ -56,6 +58,7 @@ enum AgentPalette {
         case "claude": "Claude"
         case "gemini": "Gemini"
         case "copilot": "Copilot"
+        case "cursor-grok-bot": "Grok Bot"
         default: displayName(agent)
         }
     }

@@ -88,6 +88,8 @@ own dashboard API:
   `~/Library/Application Support/Netra/cursor-events.json`. Each request's
   cost is Cursor's own API-rate price for it, the same basis as the estimates
   for other agents, so Cursor sits in the day / week / month totals and charts.
+  Grok Bot requests appear as their own **Cursor Grok Bot** line, so the
+  Cursor line matches Cursor's own cycle figure (which excludes Grok Bot).
 - The current cycle's tokens per model. The cycle dollar figure is usage
   priced at API rates — what your plan's included and bonus usage covers —
   not what you are billed; actual extra billing is the on-demand amount. That

@@ -101,6 +101,34 @@ final class CursorUsageEventsTests: XCTestCase {
         XCTAssertEqual(day.models[0].cost, 0.0475, accuracy: 0.000_001)
     }
 
+    /// Cursor's own cycle totals exclude Grok Bot (it has its own weekly
+    /// allowance), so it is its own provider line rather than inflating Cursor.
+    func testGrokBotEventsFormTheirOwnProviderLine() throws {
+        let page = try XCTUnwrap(CursorUsageEvents.page(from: fixture("cursor-filtered-usage-events.json")))
+        let daily = CursorUsageEvents.agentStats(from: page.events, granularity: .day, calendar: utc)
+        let grok = try XCTUnwrap(daily.first { $0.agent.name == CursorUsageEvents.grokBotAgent })
+        XCTAssertEqual(grok.period, "2026-09-24")
+        XCTAssertEqual(grok.agent.models.map(\.name), ["grok-bot-automation"])
+        XCTAssertEqual(grok.agent.cost, 0.005, accuracy: 0.000_001)
+        XCTAssertFalse(daily.contains { $0.agent.name == "cursor" && $0.agent.models.contains { $0.name.hasPrefix("grok-bot") } })
+
+        // Both lines still land in the same period row, and the row total covers both.
+        let events = [
+            Self.event("2026-09-25T10:00:00Z", input: 100),
+            Self.event("2026-09-25T11:00:00Z", "grok-bot-default", input: 40),
+        ]
+        let snapshot = UsageSnapshot(
+            fetchedAt: Date(timeIntervalSince1970: 1_790_400_000),
+            report: CCUnifiedReport(daily: [], weekly: [], monthly: []),
+            activeBlock: nil, codexQuota: nil, claudeQuota: nil,
+            cursorEvents: events, calendar: utc
+        )
+        let month = try XCTUnwrap(snapshot.monthly.first { $0.period == "2026-09" })
+        XCTAssertEqual(month.agentStat("cursor")?.totalTokens, 100)
+        XCTAssertEqual(month.agentStat(CursorUsageEvents.grokBotAgent)?.totalTokens, 40)
+        XCTAssertEqual(month.totalTokens, 140)
+    }
+
     func testSnapshotMergesCursorIntoExistingDayWithCost() throws {
         let report = CCUnifiedReport(
             daily: [CCRow(

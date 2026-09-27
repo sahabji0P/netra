@@ -109,14 +109,31 @@ enum CursorUsageEvents {
         return events.filter { seen.insert($0.dedupKey).inserted }
     }
 
-    /// One Cursor `AgentStat` per period key (day `yyyy-MM-dd`, week start
-    /// `yyyy-MM-dd`, or month `yyyy-MM`), ready to merge into a snapshot.
+    /// Grok Bot runs on its own weekly allowance and Cursor's dashboard
+    /// totals leave it out, so it gets its own provider line: the Cursor row
+    /// then matches Cursor's reported cycle while Grok Bot stays visible.
+    static let grokBotAgent = "cursor-grok-bot"
+
+    static func agentName(forModel model: String) -> String {
+        model.hasPrefix("grok-bot") ? grokBotAgent : "cursor"
+    }
+
+    /// Cursor `AgentStat`s per period key (day `yyyy-MM-dd`, week start
+    /// `yyyy-MM-dd`, or month `yyyy-MM`) — one for regular usage and one for
+    /// Grok Bot where present — ready to merge into a snapshot.
     static func agentStats(
         from events: [CursorUsageEvent],
         granularity: PeriodGranularity,
         calendar: Calendar = .current
     ) -> [(period: String, date: Date, agent: AgentStat)] {
-        var buckets: [String: (date: Date, events: [CursorUsageEvent])] = [:]
+        struct BucketKey: Hashable, Comparable {
+            var period: String
+            var agent: String
+            static func < (lhs: Self, rhs: Self) -> Bool {
+                (lhs.period, lhs.agent) < (rhs.period, rhs.agent)
+            }
+        }
+        var buckets: [BucketKey: (date: Date, events: [CursorUsageEvent])] = [:]
         let gregorian = PeriodKeys.gregorian(calendar)
         for event in deduplicated(events) {
             let day = gregorian.startOfDay(for: event.recordedAt)
@@ -131,19 +148,20 @@ enum CursorUsageEvents {
                 period = PeriodKeys.month(day, calendar)
                 date = gregorian.dateInterval(of: .month, for: day)?.start ?? day
             }
-            var bucket = buckets[period] ?? (date, [])
+            let key = BucketKey(period: period, agent: agentName(forModel: event.model))
+            var bucket = buckets[key] ?? (date, [])
             bucket.events.append(event)
-            buckets[period] = bucket
+            buckets[key] = bucket
         }
 
         return buckets.keys.sorted().compactMap { key in
             guard let bucket = buckets[key],
-                  let agent = agentStat(bucket.events) else { return nil }
-            return (key, bucket.date, agent)
+                  let agent = agentStat(bucket.events, name: key.agent) else { return nil }
+            return (key.period, bucket.date, agent)
         }
     }
 
-    private static func agentStat(_ events: [CursorUsageEvent]) -> AgentStat? {
+    private static func agentStat(_ events: [CursorUsageEvent], name: String) -> AgentStat? {
         var modelsByName: [String: ModelStat] = [:]
         var input = 0, output = 0, cacheWrite = 0, cacheRead = 0, total = 0
         var cost = 0.0
@@ -171,7 +189,7 @@ enum CursorUsageEvents {
         }
         guard total > 0 || cost > 0 else { return nil }
         return AgentStat(
-            name: "cursor", cost: cost, totalTokens: total,
+            name: name, cost: cost, totalTokens: total,
             inputTokens: input, outputTokens: output,
             cacheCreationTokens: cacheWrite, cacheReadTokens: cacheRead,
             models: modelsByName.values.sorted {
