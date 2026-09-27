@@ -188,15 +188,21 @@ struct DashboardUsageView: View {
         }
         .chartLegend(.hidden)
         .chartOverlay { proxy in
-            Rectangle()
-                .fill(.clear)
-                .contentShape(Rectangle())
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let location): hoveredDate = proxy.value(atX: location.x)
-                    case .ended: hoveredDate = nil
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let location):
+                            // Hover reports chart coordinates; the proxy wants
+                            // plot-area ones, which start after the cost axis.
+                            let plotX = proxy.plotFrame.map { geometry[$0].origin.x } ?? 0
+                            hoveredDate = proxy.value(atX: location.x - plotX)
+                        case .ended: hoveredDate = nil
+                        }
                     }
-                }
+            }
         }
         .chartYAxis {
             AxisMarks(position: .leading) { value in
@@ -402,17 +408,22 @@ struct DashboardUsageView: View {
         DashboardPanel(title: "Token composition", detail: Format.tokens(total.totalTokens), symbol: "square.stack.3d.down.right") {
             let parts = tokenParts
             let whole = max(parts.reduce(0) { $0 + $1.value }, 1)
+            let gaps = 1.5 * Double(max(parts.filter { $0.value > 0 }.count - 1, 0))
             VStack(alignment: .leading, spacing: 12) {
                 GeometryReader { geometry in
+                    // Segments share the width left after the gaps, so the
+                    // bar ends at the panel edge instead of overflowing it.
+                    let available = max(geometry.size.width - gaps, 0)
                     HStack(spacing: 1.5) {
                         ForEach(parts, id: \.label) { part in
                             if part.value > 0 {
                                 Rectangle()
                                     .fill(part.color)
-                                    .frame(width: max(2, geometry.size.width * Double(part.value) / Double(whole)))
+                                    .frame(width: max(2, available * Double(part.value) / Double(whole)))
                             }
                         }
                     }
+                    .frame(width: geometry.size.width, alignment: .leading)
                     .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
                 .frame(height: 14)

@@ -96,13 +96,17 @@ struct UsageDetailPanel: View {
         let whole = max(parts.reduce(0) { $0 + $1.value }, 1)
         return VStack(alignment: .leading, spacing: 6) {
             GeometryReader { geometry in
+                // Segments share the width left after the gaps, so the bar
+                // ends at the panel edge instead of overflowing it.
+                let available = max(geometry.size.width - Double(max(parts.count - 1, 0)), 0)
                 HStack(spacing: 1) {
                     ForEach(parts, id: \.label) { part in
                         Rectangle()
                             .fill(part.color)
-                            .frame(width: max(2, geometry.size.width * Double(part.value) / Double(whole)))
+                            .frame(width: max(2, available * Double(part.value) / Double(whole)))
                     }
                 }
+                .frame(width: geometry.size.width, alignment: .leading)
                 .clipShape(Capsule())
             }
             .frame(height: 6)
