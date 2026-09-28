@@ -232,6 +232,10 @@ struct MenuView: View {
                     .foregroundStyle(headerStatusColor)
                     .lineLimit(1)
             }
+            Text("v\(updates.currentVersion ?? "dev")")
+                .font(.system(size: 10, design: .rounded))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
