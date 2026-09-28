@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Netra mixed-script wordmark — stacked</title>
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <text x="512" y="505" fill="#000000" text-anchor="middle"
+        font-family="Kohinoor Devanagari, Devanagari Sangam MN, sans-serif"
+        font-size="330" font-weight="600">ने</text>
+  <text x="512" y="675" fill="#000000" text-anchor="middle"
+        font-family="Avenir Next, Helvetica Neue, sans-serif"
+        font-size="118" font-weight="600" letter-spacing="32">TRA</text>
+</svg>

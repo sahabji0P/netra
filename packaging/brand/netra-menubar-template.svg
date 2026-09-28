@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">
+  <title>Netra menu bar template icon</title>
+  <path fill="#000000" fill-rule="evenodd" d="
+    M2 18
+    C6 11 11 8 18 8
+    C25 8 30 11 34 18
+    C30 25 25 28 18 28
+    C11 28 6 25 2 18 Z
+    M6 18
+    C9 13.8 13 12 18 12
+    C23 12 27 13.8 30 18
+    C27 22.2 23 24 18 24
+    C13 24 9 22.2 6 18 Z"/>
+  <path d="M23.12 17.10 A5.2 5.2 0 1 1 18.90 12.88"
+        fill="none"
+        stroke="#000000"
+        stroke-width="3.5"
+        stroke-linecap="round"/>
+  <circle cx="18" cy="18" r="2" fill="#000000"/>
+</svg>
