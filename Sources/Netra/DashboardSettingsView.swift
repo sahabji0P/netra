@@ -8,6 +8,7 @@ struct DashboardSettingsView: View {
     @Bindable var preferences: AppPreferences
     var store: UsageStore
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @State private var websiteToken = ""
 
     var body: some View {
         DashboardPage {
@@ -29,6 +30,15 @@ struct DashboardSettingsView: View {
         }
         .onChange(of: preferences.cursorUsageEnabled) { _, enabled in
             if enabled { Task { await store.refresh() } }
+        }
+        .onChange(of: preferences.websitePublishEnabled) { _, enabled in
+            Task {
+                await store.websiteSettingsChanged()
+                if enabled { await store.publishNow() }
+            }
+        }
+        .onChange(of: preferences.websiteEndpoint) { _, _ in
+            Task { await store.websiteSettingsChanged() }
         }
     }
 
@@ -424,12 +434,102 @@ struct DashboardSettingsView: View {
                     isOn: $preferences.confettiOnReset
                 )
             }
+            websitePanel
             DashboardPanel(title: "About your data", symbol: "lock.shield") {
                 Label("Usage is calculated on this Mac from coding-agent logs by a pinned ccusage build. Limits come from each provider (Anthropic via Claude Code, OpenAI via the Codex CLI, and Cursor when connected). Transcript contents never leave this Mac.", systemImage: "info.circle")
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    // MARK: Website
+
+    private var websitePanel: some View {
+        DashboardPanel(title: "Website", detail: "Opt-in", symbol: "globe") {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsRow(
+                    "Publish usage to a website",
+                    detail: "After refreshes, send daily token and cost totals per agent and model — never projects, paths, prompts, or accounts — at most every 5 minutes. The same feed is always saved to usage-feed.json in Netra's app-support folder.",
+                    isOn: $preferences.websitePublishEnabled
+                )
+                Divider()
+                SettingsRow(title: "Endpoint", detail: endpointHint) {
+                    TextField("https://example.com/api/usage", text: $preferences.websiteEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 280)
+                }
+                Divider()
+                SettingsRow(
+                    title: "Token",
+                    detail: store.websiteTokenSaved
+                        ? "Saved in Netra's Keychain item. Enter a new one to replace it."
+                        : "Stored in Netra's own Keychain item; only sent to the endpoint."
+                ) {
+                    HStack(spacing: 8) {
+                        SecureField(store.websiteTokenSaved ? "••••••••" : "Token", text: $websiteToken)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 160)
+                            .onSubmit(saveWebsiteToken)
+                        Button("Save", action: saveWebsiteToken)
+                            .disabled(websiteToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Clear") { Task { await store.clearWebsiteToken() } }
+                            .disabled(!store.websiteTokenSaved)
+                    }
+                    .controlSize(.small)
+                }
+                Divider()
+                HStack(spacing: 10) {
+                    websiteStatus
+                        .font(.system(size: 11))
+                    Spacer()
+                    if store.isPublishing { ProgressView().controlSize(.small) }
+                    Button("Publish now") { Task { await store.publishNow() } }
+                        .controlSize(.small)
+                        .disabled(!canPublish || store.isPublishing)
+                }
+            }
+        }
+        .task { await store.loadWebsiteStatus() }
+    }
+
+    private var endpointHint: String {
+        let text = preferences.websiteEndpoint.trimmingCharacters(in: .whitespaces)
+        if !text.isEmpty, preferences.websiteEndpointURL == nil {
+            return "Use an https:// address (http:// only for localhost)."
+        }
+        return "The site's usage ingest URL."
+    }
+
+    private var canPublish: Bool {
+        preferences.websitePublishEnabled && preferences.websiteEndpointURL != nil && store.websiteTokenSaved
+    }
+
+    private func saveWebsiteToken() {
+        let token = websiteToken
+        websiteToken = ""
+        Task { await store.saveWebsiteToken(token) }
+    }
+
+    @ViewBuilder
+    private var websiteStatus: some View {
+        let state = store.publishState
+        if !preferences.websitePublishEnabled {
+            Label("Publishing is off.", systemImage: "pause.circle")
+                .foregroundStyle(.secondary)
+        } else if let error = state?.lastError {
+            Label(error, systemImage: state?.isStopped == true ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(state?.isStopped == true ? .red : .orange)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if let last = state?.lastSuccessAt {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                Label("Last published \(Format.age(since: last, now: context.date)).", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+        } else {
+            Label("Not published yet.", systemImage: "clock")
+                .foregroundStyle(.secondary)
         }
     }
 }

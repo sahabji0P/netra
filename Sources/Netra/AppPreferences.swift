@@ -72,6 +72,8 @@ final class AppPreferences {
         static let dailyTokenAlertThreshold = "preferences.alerts.dailyTokens.threshold"
         static let providerLimitAlertEnabled = "preferences.alerts.providerLimit.enabled"
         static let providerLimitAlertThreshold = "preferences.alerts.providerLimit.threshold"
+        static let websitePublishEnabled = "preferences.website.publishEnabled"
+        static let websiteEndpoint = "preferences.website.endpoint"
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -154,6 +156,17 @@ final class AppPreferences {
         didSet { defaults.set(confettiOnReset, forKey: Key.confettiOnReset) }
     }
 
+    /// Opt-in: push the usage feed (daily aggregates only) to the owner's
+    /// website after refreshes. The token lives in the Keychain, not here.
+    var websitePublishEnabled: Bool {
+        didSet { defaults.set(websitePublishEnabled, forKey: Key.websitePublishEnabled) }
+    }
+    /// Where the feed is POSTed; must be https (or http to localhost).
+    var websiteEndpoint: String {
+        didSet { defaults.set(websiteEndpoint, forKey: Key.websiteEndpoint) }
+    }
+    var websiteEndpointURL: URL? { UsagePublishEndpoint.validated(websiteEndpoint) }
+
     func isProviderVisibleInMenu(_ name: String) -> Bool {
         !hiddenMenuProviders.contains(name.lowercased())
     }
@@ -205,6 +218,8 @@ final class AppPreferences {
         claudeQuotaEnabled = defaults.object(forKey: Key.claudeQuotaEnabled) as? Bool ?? false
         cursorUsageEnabled = defaults.object(forKey: Key.cursorUsageEnabled) as? Bool ?? false
         confettiOnReset = defaults.object(forKey: Key.confettiOnReset) as? Bool ?? true
+        websitePublishEnabled = defaults.object(forKey: Key.websitePublishEnabled) as? Bool ?? false
+        websiteEndpoint = defaults.string(forKey: Key.websiteEndpoint) ?? ""
         dailyTokenAlertEnabled = defaults.object(forKey: Key.dailyTokenAlertEnabled) as? Bool ?? false
         dailyTokenAlertThreshold = max(defaults.object(forKey: Key.dailyTokenAlertThreshold) as? Int ?? 1_000_000, 1)
         providerLimitAlertEnabled = defaults.object(forKey: Key.providerLimitAlertEnabled) as? Bool ?? false
