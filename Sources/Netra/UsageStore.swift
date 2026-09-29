@@ -67,6 +67,8 @@ final class UsageStore {
     private(set) var publishState: UsagePublisherState?
     private(set) var isPublishing = false
     private(set) var websiteTokenSaved = false
+    /// A Keychain save or clear that failed, in plain words.
+    private(set) var websiteTokenError: String?
 
     /// The app's marketing version; "dev" for unbundled `swift run` builds.
     nonisolated static var appVersion: String {
@@ -255,9 +257,13 @@ final class UsageStore {
     /// the interval and backoff; may show a Keychain prompt.
     func publishNow() async {
         guard !isPublishing else { return }
-        guard let feed = latestFeed ?? snapshot.map({
-            UsageFeed.build(from: $0, version: Self.appVersion)
-        }) else { return }
+        var feed = latestFeed
+        if feed == nil, let snapshot {
+            // Launched from the cached snapshot, before the first refresh.
+            feed = await feedFile.write(snapshot, version: Self.appVersion)
+            latestFeed = feed
+        }
+        guard let feed else { return }
         await publish(feed, force: true)
     }
 
@@ -272,13 +278,15 @@ final class UsageStore {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let saved = await Task.detached { (try? UsagePublishToken.save(trimmed)) != nil }.value
+        websiteTokenError = saved ? nil : "Couldn't save the token to the Keychain."
         await websiteSettingsChanged()
         await loadWebsiteStatus()
         if saved, preferences.websitePublishEnabled { await publishNow() }
     }
 
     func clearWebsiteToken() async {
-        _ = await Task.detached { try? UsagePublishToken.delete() }.value
+        let cleared = await Task.detached { (try? UsagePublishToken.delete()) != nil }.value
+        websiteTokenError = cleared ? nil : "Couldn't remove the token from the Keychain."
         await websiteSettingsChanged()
         await loadWebsiteStatus()
     }

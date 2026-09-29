@@ -463,9 +463,9 @@ struct DashboardSettingsView: View {
                 Divider()
                 SettingsRow(
                     title: "Token",
-                    detail: store.websiteTokenSaved
+                    detail: store.websiteTokenError ?? (store.websiteTokenSaved
                         ? "Saved in Netra's Keychain item. Enter a new one to replace it."
-                        : "Stored in Netra's own Keychain item; only sent to the endpoint."
+                        : "Stored in Netra's own Keychain item; only sent to the endpoint.")
                 ) {
                     HStack(spacing: 8) {
                         SecureField(store.websiteTokenSaved ? "••••••••" : "Token", text: $websiteToken)
