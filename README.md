@@ -44,7 +44,9 @@ equal period and sparklines, the stacked activity chart, a provider donut
 (hover a provider for its models), token composition, and a model/day table
 you can filter by provider. **Subscriptions** shows every provider's limit
 windows, pace, and provider-specific detail (Cursor's billing cycle per model,
-Codex reset credits). Both always cover **every** provider found in your logs.
+Codex reset credits); its tabs switch between **All** providers and one
+provider at a time, where every account you manage for it gets a full card
+with its last-seen limits and a switch button. Both always cover **every** provider found in your logs.
 Settings are grouped into **Menu Bar & Popover**, **Limits**, **Providers**,
 **Notifications**, and **General** (which includes the opt-in **Website**
 publishing described below). The menu-bar popover is the curated view:

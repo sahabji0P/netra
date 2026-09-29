@@ -7,6 +7,20 @@ struct DashboardSubscriptionsView: View {
     var preferences: AppPreferences
     var navigation: DashboardNavigation
     var accounts: AccountStore? = nil
+    /// The sub-navigation: `nil` shows every provider, otherwise one
+    /// provider with each of its accounts.
+    @State private var focus: String?
+
+    init(
+        store: UsageStore, preferences: AppPreferences, navigation: DashboardNavigation,
+        accounts: AccountStore? = nil, focus: String? = nil
+    ) {
+        self.store = store
+        self.preferences = preferences
+        self.navigation = navigation
+        self.accounts = accounts
+        _focus = State(initialValue: focus)
+    }
 
     private var limits: [ProviderLimits] {
         store.snapshot?.providerLimits(order: preferences.orderedLimitProviders) ?? []
@@ -26,13 +40,14 @@ struct DashboardSubscriptionsView: View {
                 }
                 .disabled(store.state == .refreshing)
             }
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 16, alignment: .top), GridItem(.flexible(), spacing: 16, alignment: .top)],
-                alignment: .leading,
-                spacing: 16
-            ) {
-                ForEach(limits) { providerCard($0) }
-                ForEach(missing, id: \.self) { unavailableCard($0) }
+            providerTabs
+            if let focus, preferences.orderedLimitProviders.contains(focus) {
+                providerPage(focus)
+            } else {
+                cardGrid {
+                    ForEach(limits) { providerCard($0) }
+                    ForEach(missing, id: \.self) { unavailableCard($0) }
+                }
             }
             Label("Bars use each provider's color; the number turns red at 90%. The tick marks where an even burn to the reset would be.", systemImage: "info.circle")
                 .font(.system(size: 11))
@@ -42,7 +57,228 @@ struct DashboardSubscriptionsView: View {
         .onAppear { store.refreshIfStale() }
     }
 
-    private func providerCard(_ limits: ProviderLimits) -> some View {
+    private func cardGrid<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 16, alignment: .top), GridItem(.flexible(), spacing: 16, alignment: .top)],
+            alignment: .leading,
+            spacing: 16
+        ) {
+            content()
+        }
+    }
+
+    // MARK: Sub-navigation
+
+    private var providerTabs: some View {
+        HStack(spacing: 6) {
+            tab(title: "All", agent: nil, count: nil)
+            ForEach(preferences.orderedLimitProviders, id: \.self) { agent in
+                tab(title: AgentPalette.shortName(agent), agent: agent, count: accountCount(agent))
+            }
+            Spacer()
+        }
+    }
+
+    private func tab(title: String, agent: String?, count: Int?) -> some View {
+        let selected = focus == agent
+        let tint = agent.map(AgentPalette.color(for:)) ?? Color.secondary
+        return Button {
+            focus = agent
+        } label: {
+            HStack(spacing: 6) {
+                if let agent {
+                    Circle()
+                        .fill(AgentPalette.color(for: agent))
+                        .frame(width: 7, height: 7)
+                } else {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                Text(title)
+                    .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                if let count {
+                    Text("\(count)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(.quaternary.opacity(0.8), in: Capsule())
+                }
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .foregroundStyle(selected ? Color.primary : Color.secondary)
+            .background(selected ? tint.opacity(0.18) : Color.clear, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(selected ? tint.opacity(0.45) : Color.primary.opacity(0.1), lineWidth: 0.5)
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// Managed accounts for a provider, shown on its tab once there is more
+    /// than one.
+    private func accountCount(_ agent: String) -> Int? {
+        guard let accounts, let provider = AccountProvider(rawValue: agent) else { return nil }
+        let count = accounts.roster.accounts(for: provider).count
+        return count > 1 ? count : nil
+    }
+
+    // MARK: One provider
+
+    /// The signed-in account's limits first, then every parked account at
+    /// the same size.
+    @ViewBuilder
+    private func providerPage(_ agent: String) -> some View {
+        let parked = AccountProvider(rawValue: agent).flatMap { accounts?.parkedAccounts(for: $0) } ?? []
+        cardGrid {
+            if let limits = limits.first(where: { $0.agent == agent }) {
+                providerCard(limits, focused: true)
+            } else {
+                unavailableCard(agent)
+            }
+            ForEach(parked) { parkedAccountCard($0) }
+        }
+        if let provider = AccountProvider(rawValue: agent), accounts != nil, parked.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "person.2")
+                    .foregroundStyle(.secondary)
+                Text("Use more than one \(AgentPalette.shortName(provider.agent)) account? Add it to switch between them here.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                Button("Manage accounts…") { navigation.selection = .accounts }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    /// The live account's face, above its limits on a provider tab.
+    @ViewBuilder
+    private func activeAccountRow(_ agent: String) -> some View {
+        if let accounts, let provider = AccountProvider(rawValue: agent),
+           let active = accounts.activeAccount(for: provider) {
+            HStack(spacing: 9) {
+                AccountAvatar(account: active, size: 26, isActive: true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(accounts.roster.label(for: active))
+                        .font(.system(size: 12.5, weight: .medium))
+                        .lineLimit(1)
+                    Text(active.title)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Label("Signed in", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AgentPalette.color(for: agent))
+            }
+        }
+    }
+
+    /// A parked account at full size: every window it was last seen with,
+    /// and the switch.
+    private func parkedAccountCard(_ account: ManagedAccount) -> some View {
+        let agent = account.provider.agent
+        let label = accounts?.roster.label(for: account) ?? account.shortLabel
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 9) {
+                AccountAvatar(account: account, size: 26)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 7) {
+                        Text(label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        if let plan = account.identity.plan {
+                            badge(capitalized(plan))
+                        }
+                    }
+                    Text(account.title)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(AccountText.parkedStatus(account, now: context.date))
+                        .font(.system(size: 11))
+                        .foregroundStyle(account.attention == nil ? .secondary : Color.orange)
+                }
+            }
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                let windows = account.parkedWindows(now: context.date)
+                VStack(alignment: .leading, spacing: 14) {
+                    if windows.isEmpty {
+                        Text("Netra hasn't seen this account's limits yet. Switch to it once to read them.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(windows, id: \.self) { parked in
+                        if parked.hasResetSince {
+                            resetWindowRow(parked.window, agent: agent)
+                        } else {
+                            LimitWindowRow(
+                                window: parked.window, agent: agent,
+                                showRemaining: preferences.barsShowRemaining,
+                                showsPace: preferences.showsPace,
+                                resetStyle: preferences.resetTimeStyle,
+                                titleSize: 13
+                            )
+                        }
+                    }
+                }
+            }
+            Divider()
+            HStack {
+                Text("Parked · \(account.lastLimits?.isLive == true ? "reported by \(AgentPalette.shortName(agent))" : "last seen in the CLI")")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    Task { await accounts?.switchTo(account) }
+                } label: {
+                    if accounts?.switching == account.provider {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Switch to \(label)", systemImage: "arrow.left.arrow.right")
+                    }
+                }
+                .tint(AgentPalette.color(for: agent))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(accounts?.switching != nil || account.attention != nil)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(CardBackground())
+    }
+
+    /// A window that rolled over after Netra last saw it: its old percentage
+    /// is no longer this account's usage, so none is shown.
+    private func resetWindowRow(_ window: QuotaWindow, agent: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(LimitText.title(window.label))
+                    .font(.system(size: 13, weight: .medium))
+                Spacer()
+                Text("Reset")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AgentPalette.color(for: agent))
+            }
+            LimitBar(fraction: preferences.barsShowRemaining ? 1 : 0, color: AgentPalette.color(for: agent).opacity(0.35), marker: nil)
+            Text("Rolled over since Netra last saw it — switch in to read fresh limits")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Cards
+
+    private func providerCard(_ limits: ProviderLimits, focused: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             cardHeader(agent: limits.agent, badge: limits.isEstimate ? "Estimate" : limits.plan.map(capitalized)) {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -50,6 +286,9 @@ struct DashboardSubscriptionsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
+            }
+            if focused {
+                activeAccountRow(limits.agent)
             }
             ForEach(limits.windows, id: \.self) { window in
                 LimitWindowRow(
@@ -74,15 +313,13 @@ struct DashboardSubscriptionsView: View {
             if limits.agent == "cursor", let quota = store.snapshot?.cursorQuota {
                 cursorCycle(quota)
             }
-            otherAccounts(limits.agent)
+            if !focused {
+                otherAccounts(limits.agent)
+            }
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.separator.opacity(0.55), lineWidth: 0.5)
-        }
+        .modifier(CardBackground())
     }
 
     /// Parked accounts for this provider, each a click away.
@@ -161,16 +398,20 @@ struct DashboardSubscriptionsView: View {
             Text(AgentPalette.shortName(agent))
                 .font(.system(size: 15, weight: .semibold))
             if let badge {
-                Text(badge)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(.quaternary.opacity(0.7), in: Capsule())
+                self.badge(badge)
             }
             Spacer()
             trailing()
         }
+    }
+
+    private func badge(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(.quaternary.opacity(0.7), in: Capsule())
     }
 
     private func freshness(_ limits: ProviderLimits, now: Date) -> String {
@@ -285,5 +526,16 @@ struct DashboardSubscriptionsView: View {
             : "Cursor isn't connected. Turn it on to read your limits and per-request usage from Cursor's own API."
         default: "No limit source."
         }
+    }
+}
+
+private struct CardBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.separator.opacity(0.55), lineWidth: 0.5)
+            }
     }
 }
