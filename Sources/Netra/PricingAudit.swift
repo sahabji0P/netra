@@ -11,7 +11,7 @@ enum PricingAudit {
 
     // MARK: Hermes routing fix
 
-    /// ccusage 20.0.24 prices Hermes sessions billed through OpenAI under
+    /// ccusage 20.0.26 prices Hermes sessions billed through OpenAI under
     /// `openai/<model>`, which its fuzzy LiteLLM lookup resolves to a
     /// different model's rate (gpt-5.6-sol → OpenRouter's batch price, a
     /// quarter of list). An override on that exact key restores list price;
