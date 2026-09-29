@@ -112,7 +112,9 @@ enum CodexLiveQuota {
 
     /// Blocking; call off the main actor. Nil when Codex is not installed,
     /// not logged in, or the server does not answer in time.
-    static func fetch(now: Date = .now) -> CodexQuota? {
+    /// `codexHome` points the CLI at another `CODEX_HOME` (a parked
+    /// account's private copy); nil uses the live sign-in.
+    static func fetch(now: Date = .now, codexHome: URL? = nil) -> CodexQuota? {
         guard let binary = resolveBinary() else { return nil }
         let process = Process()
         process.executableURL = binary
@@ -121,6 +123,7 @@ enum CodexLiveQuota {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         environment["PATH"] = ["\(home)/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
                                environment["PATH"] ?? ""].joined(separator: ":")
+        if let codexHome { environment["CODEX_HOME"] = codexHome.path }
         process.environment = environment
         let input = Pipe(), output = Pipe()
         process.standardInput = input
@@ -200,7 +203,7 @@ enum CodexLiveQuota {
         )
     }
 
-    private static func resolveBinary() -> URL? {
+    static func resolveBinary() -> URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates = [
             ProcessInfo.processInfo.environment["NETRA_CODEX"],

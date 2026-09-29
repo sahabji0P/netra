@@ -57,7 +57,11 @@ extension UsageSnapshot {
         if let quota = claudeQuota {
             let windows = quota.activeWindows(now: now)
             if !windows.isEmpty {
-                let source = quota.source == .oauth ? "Reported by Anthropic" : "Via Claude Code"
+                let source = switch quota.source {
+                case .oauth: "Reported by Anthropic"
+                case .claudeCodeCache: "Via Claude Code"
+                case .lastSeen: "Last seen"
+                }
                 return ProviderLimits(
                     agent: "claude", plan: quota.subscriptionType, source: source,
                     observedAt: quota.fetchedAt, windows: windows,
@@ -81,9 +85,14 @@ extension UsageSnapshot {
         guard let quota = codexQuota else { return nil }
         let windows = quota.activeWindows(now: now)
         guard !windows.isEmpty else { return nil }
+        let source = switch quota.source {
+        case .live: "Reported by OpenAI"
+        case .lastSeen: "Last seen"
+        default: "Last Codex session"
+        }
         return ProviderLimits(
             agent: "codex", plan: quota.planType,
-            source: quota.source == .live ? "Reported by OpenAI" : "Last Codex session",
+            source: source,
             observedAt: quota.observedAt, windows: windows,
             note: codexNote(quota),
             resetCredits: bankedResets(quota, now: now),

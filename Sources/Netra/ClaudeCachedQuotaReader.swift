@@ -35,6 +35,14 @@ enum ClaudeCachedQuotaReader {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let cached = object["cachedUsageUtilization"] as? [String: Any],
               let utilization = cached["utilization"] as? [String: Any] else { return nil }
+        // Claude Code stamps its cache with the account it measured. After an
+        // account switch a cache for another account must not be read as this
+        // one's.
+        if let measured = JSONValue.string(cached["accountUuid"]),
+           let signedIn = JSONValue.string((object["oauthAccount"] as? [String: Any])?["accountUuid"]),
+           measured != signedIn {
+            return nil
+        }
 
         let fetchedAt = (cached["fetchedAtMs"] as? NSNumber)
             .map { Date(timeIntervalSince1970: $0.doubleValue / 1000) } ?? .now
@@ -107,6 +115,11 @@ enum ClaudeCachedQuotaReader {
     /// (e.g. "default_claude_max_5x") more reliably than subscriptionType.
     private static func planLabel(from object: [String: Any]) -> String? {
         guard let account = object["oauthAccount"] as? [String: Any] else { return nil }
+        return planLabel(fromAccount: account)
+    }
+
+    /// Plan label for one `oauthAccount` object.
+    static func planLabel(fromAccount account: [String: Any]) -> String? {
         guard let tier = account["userRateLimitTier"] as? String else { return nil }
         let known: [(needle: String, label: String)] = [
             ("max_20x", "Max 20x"), ("max_5x", "Max 5x"),

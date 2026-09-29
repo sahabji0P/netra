@@ -22,6 +22,9 @@ struct MenuView: View {
     @State var panelHoverTask: Task<Void, Never>?
     @State private var appliedDefaultPeriod = false
 
+    /// Managed Claude Code and Codex accounts; nil hides account controls.
+    var accounts: AccountStore? = nil
+
     static let width: CGFloat = 360
     /// Offscreen renders take one layout pass, so the measured height never
     /// settles; the preview harness draws the content at full height instead.
@@ -182,6 +185,7 @@ struct MenuView: View {
     private var menuContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            accountNoticeBanner
             if showsLimitCards {
                 limitsSection
                 sectionDivider
@@ -596,7 +600,7 @@ struct MenuView: View {
         .accessibilityLabel(help)
     }
 
-    private func showDashboard(_ section: DashboardSection) {
+    func showDashboard(_ section: DashboardSection) {
         dashboardNavigation.selection = section
         openWindow(id: "dashboard")
         NSApp.activate(ignoringOtherApps: true)

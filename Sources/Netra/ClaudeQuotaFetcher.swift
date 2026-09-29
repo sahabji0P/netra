@@ -13,6 +13,9 @@ struct ClaudeQuota: Codable, Sendable {
     enum Source: String, Codable, Sendable {
         case oauth
         case claudeCodeCache
+        /// Netra's own record for this account, shown until a fresh read
+        /// arrives (e.g. right after switching to a parked account).
+        case lastSeen
     }
 
     var windows: [QuotaWindow]
@@ -23,18 +26,22 @@ struct ClaudeQuota: Codable, Sendable {
     var source: Source
     /// Pay-as-you-go credits that cover you past the plan limits.
     var extraUsage: ClaudeExtraUsage?
+    /// `AccountIdentity.key` of the account these limits belong to, when
+    /// known. A previous quota is only reused for the same account.
+    var accountKey: String?
 
     init(windows: [QuotaWindow], subscriptionType: String?, fetchedAt: Date,
-         source: Source = .oauth, extraUsage: ClaudeExtraUsage? = nil) {
+         source: Source = .oauth, extraUsage: ClaudeExtraUsage? = nil, accountKey: String? = nil) {
         self.windows = windows
         self.subscriptionType = subscriptionType
         self.fetchedAt = fetchedAt
         self.source = source
         self.extraUsage = extraUsage
+        self.accountKey = accountKey
     }
 
     private enum CodingKeys: String, CodingKey {
-        case windows, subscriptionType, fetchedAt, source, extraUsage
+        case windows, subscriptionType, fetchedAt, source, extraUsage, accountKey
     }
 
     init(from decoder: Decoder) throws {
@@ -44,6 +51,7 @@ struct ClaudeQuota: Codable, Sendable {
         fetchedAt = try values.decode(Date.self, forKey: .fetchedAt)
         source = try values.decodeIfPresent(Source.self, forKey: .source) ?? .oauth
         extraUsage = try values.decodeIfPresent(ClaudeExtraUsage.self, forKey: .extraUsage)
+        accountKey = try values.decodeIfPresent(String.self, forKey: .accountKey)
     }
 
     /// Windows still inside their reported cycle. A window whose reset has
@@ -109,21 +117,34 @@ enum ClaudeQuotaFetcher {
     /// password dialog every minute. Only a user action allows the prompt.
     static func fetch(allowingPrompt: Bool = false) async throws -> ClaudeQuota {
         let credentials = try cachedCredentials() ?? readCredentials(allowingPrompt: allowingPrompt)
+        do {
+            return try await fetchUsage(accessToken: credentials.accessToken, subscriptionType: credentials.subscriptionType)
+        } catch ClaudeQuotaError.http(401) {
+            // A rejected token was rotated or revoked; read the current one next time.
+            invalidateCachedCredentials()
+            throw ClaudeQuotaError.http(401)
+        }
+    }
 
+    /// Forgets the in-memory token, e.g. after Netra switched Claude Code to
+    /// another account, so the next fetch reads the new account's sign-in.
+    static func invalidateCachedCredentials() {
+        credentialCache.withLock { $0 = nil }
+    }
+
+    /// One usage request with a given access token. Also used for a parked
+    /// account's still-valid token; this never refreshes a token.
+    static func fetchUsage(accessToken: String, subscriptionType: String?) async throws -> ClaudeQuota {
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.timeoutInterval = 15
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ClaudeQuotaError.http(-1) }
-        guard http.statusCode == 200 else {
-            // A rejected token was rotated or revoked; read the current one next time.
-            if http.statusCode == 401 { credentialCache.withLock { $0 = nil } }
-            throw ClaudeQuotaError.http(http.statusCode)
-        }
+        guard http.statusCode == 200 else { throw ClaudeQuotaError.http(http.statusCode) }
 
-        return try quota(fromResponse: data, subscriptionType: credentials.subscriptionType)
+        return try quota(fromResponse: data, subscriptionType: subscriptionType)
     }
 
     /// Parses the usage-endpoint response. Split out so the (unofficial,

@@ -6,6 +6,7 @@ struct DashboardSubscriptionsView: View {
     @Bindable var store: UsageStore
     var preferences: AppPreferences
     var navigation: DashboardNavigation
+    var accounts: AccountStore? = nil
 
     private var limits: [ProviderLimits] {
         store.snapshot?.providerLimits(order: preferences.orderedLimitProviders) ?? []
@@ -73,6 +74,7 @@ struct DashboardSubscriptionsView: View {
             if limits.agent == "cursor", let quota = store.snapshot?.cursorQuota {
                 cursorCycle(quota)
             }
+            otherAccounts(limits.agent)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,6 +82,40 @@ struct DashboardSubscriptionsView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(.separator.opacity(0.55), lineWidth: 0.5)
+        }
+    }
+
+    /// Parked accounts for this provider, each a click away.
+    @ViewBuilder
+    private func otherAccounts(_ agent: String) -> some View {
+        if let accounts, let provider = AccountProvider(rawValue: agent) {
+            let parked = accounts.parkedAccounts(for: provider)
+            if !parked.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    Divider()
+                    HStack {
+                        Text("Other accounts")
+                            .font(.system(size: 12.5, weight: .medium))
+                        Spacer()
+                        if let active = accounts.activeAccount(for: provider) {
+                            Text("Signed in as \(active.title)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    ForEach(parked) { account in
+                        ParkedAccountRow(
+                            account: account,
+                            label: accounts.roster.label(for: account),
+                            showRemaining: preferences.barsShowRemaining,
+                            isSwitching: accounts.switching == provider,
+                            switchDisabled: accounts.switching != nil
+                        ) {
+                            Task { await accounts.switchTo(account) }
+                        }
+                    }
+                }
+            }
         }
     }
 

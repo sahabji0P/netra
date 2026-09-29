@@ -61,6 +61,14 @@ final class UsageStore {
     private let cursorEventStore = CursorEventStore()
     private let feedFile: UsageFeedFile
     private let publisher: UsagePublisher
+    /// Managed accounts, when multi-account switching is wired in. Limits are
+    /// tagged with the signed-in account so one account's numbers are never
+    /// shown as another's after a switch.
+    private weak var accounts: AccountStore?
+    /// Who each CLI was signed in as at the last refresh, and when that last
+    /// changed — also when the change happened outside Netra (`/login`).
+    private var lastIdentityKeys: [AccountProvider: String] = [:]
+    private var identityChangedAt: [AccountProvider: Date] = [:]
     /// The feed from the latest successful refresh, for "Publish now".
     private var latestFeed: UsageFeed?
     /// Website publishing status for Settings (never contains the token).
@@ -81,10 +89,12 @@ final class UsageStore {
         celebrations: ResetCelebrationStore = ResetCelebrationStore(),
         feedFile: UsageFeedFile = UsageFeedFile(),
         publisher: UsagePublisher? = nil,
+        accounts: AccountStore? = nil,
         startsAutomatically: Bool = true
     ) {
         self.preferences = preferences
         self.feedFile = feedFile
+        self.accounts = accounts
         self.publisher = publisher ?? UsagePublisher(version: Self.appVersion)
         self.alerts = alerts ?? UsageAlertController()
         self.celebrations = celebrations
@@ -121,6 +131,13 @@ final class UsageStore {
                 // Keep the last observed values when a secondary reader fails;
                 // a successful "no active block" result still clears that value.
                 let previousSnapshot = snapshot
+                // Who each CLI is signed in as, from its own files (no secrets).
+                let live = await Task.detached {
+                    (claude: ClaudeAccountSession.current().liveIdentity(),
+                     codex: CodexAccountSession.current().liveIdentity())
+                }.value
+                let codexKey = live.codex?.key, claudeKey = live.claude?.key
+                noteIdentities(claude: claudeKey, codex: codexKey)
                 let block: BlockStat?
                 do {
                     block = try await client.fetchActiveBlock()
@@ -132,25 +149,42 @@ final class UsageStore {
                 // session-log snapshot, then the last observed value.
                 // Attempts are spaced whether or not they succeed, so a Mac
                 // without a signed-in Codex CLI never spawns it every tick.
-                let codexQuota: CodexQuota?
+                var codexQuota: CodexQuota?
                 let liveDue = codexLiveAttemptedAt.map { Date.now.timeIntervalSince($0) >= liveQuotaMaxAge } ?? true
-                if !liveDue, let previous = previousSnapshot?.codexQuota, previous.source == .live {
+                // A previous reading is only reused for the same account.
+                let previousCodex = previousSnapshot?.codexQuota.flatMap { Self.sameAccount($0.accountKey, codexKey) ? $0 : nil }
+                if !liveDue, let previous = previousCodex, previous.source == .live {
                     codexQuota = previous
                 } else {
-                    var live: CodexQuota?
+                    var liveQuota: CodexQuota?
                     if liveDue {
                         codexLiveAttemptedAt = .now
-                        live = await Task.detached { CodexLiveQuota.fetch() }.value
+                        liveQuota = await Task.detached { CodexLiveQuota.fetch() }.value
+                        liveQuota?.accountKey = codexKey
                     }
-                    if let live {
-                        codexQuota = live
+                    if let liveQuota {
+                        codexQuota = liveQuota
                     } else {
                         // Keep the newest observation: an earlier live read
-                        // outranks an older session-log snapshot.
-                        let logged = await Task.detached { CodexQuotaReader.read() }.value
-                        codexQuota = [logged, previousSnapshot?.codexQuota].compactMap { $0 }
+                        // outranks an older session-log snapshot. Logs carry
+                        // no account, so one written before Netra's last
+                        // switch belongs to the previous account.
+                        var logged = await Task.detached { CodexQuotaReader.read() }.value
+                        let switched = [accounts?.roster.lastSwitch(.codex), identityChangedAt[.codex]]
+                            .compactMap { $0 }.max()
+                        if let switched, (logged?.observedAt ?? .distantPast) < switched {
+                            logged = nil
+                        }
+                        logged?.accountKey = codexKey
+                        codexQuota = [logged, previousCodex].compactMap { $0 }
                             .max { ($0.observedAt ?? .distantPast) < ($1.observedAt ?? .distantPast) }
                     }
+                }
+                if codexQuota == nil, let record = accounts?.lastKnownLimits(for: live.codex) {
+                    codexQuota = CodexQuota(
+                        windows: record.windows, planType: live.codex?.plan, observedAt: record.observedAt,
+                        source: .lastSeen, accountKey: codexKey
+                    )
                 }
                 // Real Claude limits, best source first:
                 // 1. Live OAuth fetch — opt-in, because reading Claude Code's
@@ -179,11 +213,18 @@ final class UsageStore {
                 if claudeQuota == nil {
                     claudeQuota = await Task.detached { ClaudeCachedQuotaReader.read() }.value
                 }
+                claudeQuota?.accountKey = claudeKey
                 // Keep whichever observation is newest — an earlier live fetch
-                // can outrank a stale Claude Code cache.
-                if let previous = previousSnapshot?.claudeQuota,
+                // can outrank a stale Claude Code cache — for the same account.
+                if let previous = previousSnapshot?.claudeQuota, Self.sameAccount(previous.accountKey, claudeKey),
                    previous.fetchedAt > (claudeQuota?.fetchedAt ?? .distantPast) {
                     claudeQuota = previous
+                }
+                if claudeQuota == nil, let record = accounts?.lastKnownLimits(for: live.claude) {
+                    claudeQuota = ClaudeQuota(
+                        windows: record.windows, subscriptionType: live.claude?.plan,
+                        fetchedAt: record.observedAt, source: .lastSeen, accountKey: claudeKey
+                    )
                 }
                 // Cursor usage is opt-in: it reads Cursor's saved login and
                 // queries Cursor's undocumented dashboard API. Quota failure
@@ -214,6 +255,9 @@ final class UsageStore {
                 await cache.save(fresh)
                 exportFeed(from: fresh)
                 detectResetCelebration(in: fresh)
+                if let accounts {
+                    Task { await accounts.didRefresh(fresh) }
+                }
                 let alertConfiguration = preferences.alertConfiguration
                 Task {
                     await alerts.processFreshSnapshot(
@@ -328,6 +372,35 @@ final class UsageStore {
     func authorizeClaudeKeychain() async {
         await refreshTask?.value
         claudeKeychainPromptRequested = true
+        await refresh()
+    }
+
+    /// A reading saved before readings were tagged (nil) is taken as the
+    /// current account's, once; a tagged one must match.
+    private static func sameAccount(_ reading: String?, _ live: String?) -> Bool {
+        reading == nil || reading == live
+    }
+
+    /// Notices a sign-in change made anywhere (Netra, `/login`, another
+    /// switcher) and drops what belonged to the previous account: the cached
+    /// Claude token and the spacing of live Codex reads.
+    private func noteIdentities(claude: String?, codex: String?) {
+        for (provider, key) in [(AccountProvider.claude, claude), (.codex, codex)] {
+            defer { lastIdentityKeys[provider] = key }
+            guard let previous = lastIdentityKeys[provider], previous != key else { continue }
+            identityChangedAt[provider] = .now
+            switch provider {
+            case .claude: ClaudeQuotaFetcher.invalidateCachedCredentials()
+            case .codex: codexLiveAttemptedAt = nil
+            }
+        }
+    }
+
+    /// Netra just switched `provider`'s account: forget the previous
+    /// account's cached reads and refresh now instead of waiting for the timer.
+    func accountDidSwitch(_ provider: AccountProvider) async {
+        await refreshTask?.value
+        if provider == .codex { codexLiveAttemptedAt = nil }
         await refresh()
     }
 

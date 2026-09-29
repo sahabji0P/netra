@@ -103,17 +103,26 @@ extension UsageSnapshot {
         // Raw windows, not activeWindows(): a window must stay observable
         // while its old reset boundary passes, so the rollover to the new
         // boundary can be detected rather than the key disappearing.
-        func add(_ provider: String, _ quotaWindows: [QuotaWindow]) {
+        // Keyed per account when known, so switching accounts never reads
+        // another account's reset boundary as a rollover.
+        func add(_ provider: String, _ quotaWindows: [QuotaWindow], account: String? = nil) {
+            let scope = account.map { "\(provider)#\($0)" } ?? provider
             for window in quotaWindows {
                 windows.append(ResetWindow(
-                    key: "\(provider):\(window.label)",
+                    key: "\(scope):\(window.label)",
                     provider: provider,
                     resetsAt: window.resetsAt
                 ))
             }
         }
-        if let claude = claudeQuota { add("claude", claude.windows) }
-        if let codex = codexQuota { add("codex", codex.windows) }
+        // Netra's own last-seen records are old readings, not observations
+        // of a rollover; they must not seed or trigger a celebration.
+        if let claude = claudeQuota, claude.source != .lastSeen {
+            add("claude", claude.windows, account: claude.accountKey)
+        }
+        if let codex = codexQuota, codex.source != .lastSeen {
+            add("codex", codex.windows, account: codex.accountKey)
+        }
         if let cursor = cursorQuota { add("cursor", cursor.windows) }
         return windows
     }
