@@ -12,7 +12,7 @@ final class PinnedCCUsageTests: XCTestCase {
             .appendingPathComponent("ccusage-bin")
     }
 
-    /// ccusage 20.0.24 prices Hermes sessions billed through OpenAI under
+    /// ccusage 20.0.26 prices Hermes sessions billed through OpenAI under
     /// `openai/<model>`, which resolves to OpenRouter's batch rate. The
     /// override Netra writes for that exact key must restore list price
     /// ($4 in / $20 out / $0.40 cache read per 1M for gpt-5.6-sol).
@@ -55,12 +55,17 @@ final class PinnedCCUsageTests: XCTestCase {
     }
 
     private func runReport(home: URL, extraArguments: [String] = []) throws -> CCUnifiedReport {
-        let process = Process()
-        process.executableURL = binary
-        process.arguments = [
+        let data = try runBinary(home: home, arguments: [
             "daily", "--sections", "daily,weekly,monthly", "--by-agent",
             "--json", "--offline", "--since", "20260901", "--until", "20260930",
-        ] + extraArguments
+        ] + extraArguments)
+        return try JSONDecoder().decode(CCUnifiedReport.self, from: data)
+    }
+
+    private func runBinary(home: URL, arguments: [String]) throws -> Data {
+        let process = Process()
+        process.executableURL = binary
+        process.arguments = arguments
         process.environment = [
             "HOME": home.path,
             "CLAUDE_CONFIG_DIR": home.appendingPathComponent(".claude").path,
@@ -73,7 +78,32 @@ final class PinnedCCUsageTests: XCTestCase {
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0)
-        return try JSONDecoder().decode(CCUnifiedReport.self, from: data)
+        return data
+    }
+
+    /// Gateways that answer every response with one message ID and no
+    /// request ID: ccusage 20.0.24 counted each response in the unified
+    /// report but collapsed them in `blocks`, so the 5h block estimate
+    /// undercounted. Each response must count once, in both reports.
+    func testRequestlessGatewayResponsesCountOnceInReportAndBlocks() throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let project = home.appendingPathComponent(".claude/projects/-synthetic", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let fixture = try XCTUnwrap(Bundle.module.url(
+            forResource: "claude-requestless-gateway.jsonl", withExtension: nil, subdirectory: "Fixtures"
+        ))
+        try FileManager.default.copyItem(at: fixture, to: project.appendingPathComponent("session.jsonl"))
+
+        let report = try runReport(home: home)
+        XCTAssertEqual(report.daily?.first { $0.period == "2026-09-15" }?.totalTokens, 4_500)
+        XCTAssertEqual(report.weekly?.reduce(0) { $0 + $1.totalTokens }, 4_500)
+        XCTAssertEqual(report.monthly?.first { $0.period == "2026-09" }?.totalTokens, 4_500)
+        let blocks = try JSONDecoder().decode(
+            CCBlocksReport.self,
+            from: runBinary(home: home, arguments: ["blocks", "--json", "--offline", "--since", "20260901"])
+        )
+        XCTAssertEqual(blocks.blocks?.filter { $0.isGap != true }.reduce(0) { $0 + $1.totalTokens }, 4_500)
     }
 
     /// Claude Code 2.1.266–2.1.278 wrote `usage.iterations[].model: null`;

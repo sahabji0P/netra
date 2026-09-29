@@ -121,7 +121,7 @@ popover, and optional daily-token or usage-indicator alerts. macOS
 notification permission is requested only after an alert is enabled.
 Equivalent API cost is an estimate, not subscription spend. Models missing
 from ccusage's offline price table, and Hermes sessions billed through OpenAI
-(which ccusage 20.0.24 prices at the wrong rate), get LiteLLM list-price
+(which ccusage 20.0.26 prices at the wrong rate), get LiteLLM list-price
 overrides fetched once. Each refresh also compares every model-month against
 tokens × list price (a weekly-refreshed LiteLLM snapshot) and logs any cost
 more than 25% below or 2.5× above it under the `pricing` log category.
@@ -258,7 +258,7 @@ pinned binary against synthetic logs in `PinnedCCUsageTests`) — or set
   - `MenuView.swift` / `LimitsViews.swift` / `LimitSummary.swift` — the popover UI and limit/pace text rules
   - `Account*.swift`, `ClaudeAccountSession.swift`, `CodexAccountSession.swift` — multi-account roster, Keychain vault, and the Claude Code / Codex sign-in swap
   - `AccountsViews.swift` / `DashboardAccountsView.swift` — account switcher in the popover and the Accounts settings page
-- `ccusage-bin` — pinned ccusage 20.0.24 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
+- `ccusage-bin` — pinned ccusage 20.0.26 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
 - `VERSION` — next app-bundle version used by local builds (publishing remains explicit)
 - `fixtures/` — captured real JSON output + benchmark notes
 
