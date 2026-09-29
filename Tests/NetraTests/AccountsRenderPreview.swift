@@ -54,6 +54,14 @@ final class AccountsRenderPreview: XCTestCase {
             .frame(width: 1100, height: 1000),
             name: "accounts-subscriptions", outputDir: outputDir
         )
+        render(
+            DashboardSubscriptionsView(
+                store: store, preferences: preferences,
+                navigation: DashboardNavigation(selection: .subscriptions), accounts: accounts, focus: "claude"
+            )
+            .frame(width: 1100, height: 1000),
+            name: "accounts-subscriptions-claude", outputDir: outputDir
+        )
     }
 
     // MARK: Synthetic data
