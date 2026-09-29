@@ -29,10 +29,16 @@ final class RenderPreviewHarness: XCTestCase {
                 scheduler: RenderInertScheduler(),
                 persistence: RenderInertPersistence()
             ),
+            feedFile: UsageFeedFile(url: URL(fileURLWithPath: outputDir).appendingPathComponent("usage-feed.json")),
+            publisher: UsagePublisher(defaults: UserDefaults(suiteName: suiteName)!, version: "render", tokenProvider: { _ in nil }),
             startsAutomatically: false
         )
         await store.refresh()
         XCTAssertNotNil(store.snapshot, "live ccusage scan should produce a snapshot")
+        // Show the Website panel configured (set after the refresh, so
+        // nothing is published).
+        preferences.websitePublishEnabled = true
+        preferences.websiteEndpoint = "https://example.com/api/usage"
 
         let menu = MenuView(
             store: store,
@@ -67,7 +73,7 @@ final class RenderPreviewHarness: XCTestCase {
                 .frame(width: 1100, height: 1000),
             name: "dashboard-subscriptions", outputDir: outputDir
         )
-        for section in [DashboardSection.menuBar, .limits, .providers] {
+        for section in [DashboardSection.menuBar, .limits, .providers, .general] {
             render(
                 DashboardSettingsView(section: section, preferences: preferences, store: store)
                     .frame(width: 860, height: 1000),

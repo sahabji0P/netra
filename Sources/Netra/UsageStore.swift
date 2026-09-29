@@ -60,6 +60,13 @@ final class UsageStore {
     private var codexLiveAttemptedAt: Date?
     private let cursorEventStore = CursorEventStore()
     private let feedFile: UsageFeedFile
+    private let publisher: UsagePublisher
+    /// The feed from the latest successful refresh, for "Publish now".
+    private var latestFeed: UsageFeed?
+    /// Website publishing status for Settings (never contains the token).
+    private(set) var publishState: UsagePublisherState?
+    private(set) var isPublishing = false
+    private(set) var websiteTokenSaved = false
 
     /// The app's marketing version; "dev" for unbundled `swift run` builds.
     nonisolated static var appVersion: String {
@@ -71,10 +78,12 @@ final class UsageStore {
         alerts: UsageAlertController? = nil,
         celebrations: ResetCelebrationStore = ResetCelebrationStore(),
         feedFile: UsageFeedFile = UsageFeedFile(),
+        publisher: UsagePublisher? = nil,
         startsAutomatically: Bool = true
     ) {
         self.preferences = preferences
         self.feedFile = feedFile
+        self.publisher = publisher ?? UsagePublisher(version: Self.appVersion)
         self.alerts = alerts ?? UsageAlertController()
         self.celebrations = celebrations
         guard startsAutomatically else { return }
@@ -220,14 +229,64 @@ final class UsageStore {
         refreshTask = nil
     }
 
-    /// Writes the public usage feed for a successful snapshot. Runs beside
-    /// the refresh and never blocks or fails it; only successful refreshes
-    /// reach here, so a failure never replaces the last good feed.
+    /// Writes the public usage feed for a successful snapshot and, when
+    /// website publishing is on, offers it to the publisher (which applies
+    /// its own throttling). Runs beside the refresh and never blocks or
+    /// fails it; only successful refreshes reach here, so a failure never
+    /// replaces the last good feed.
     private func exportFeed(from snapshot: UsageSnapshot) {
         let version = Self.appVersion
         Task { [feedFile] in
-            await feedFile.write(snapshot, version: version)
+            let feed = await feedFile.write(snapshot, version: version)
+            latestFeed = feed
+            guard preferences.websitePublishEnabled, !isPublishing else { return }
+            await publish(feed, force: false)
         }
+    }
+
+    private func publish(_ feed: UsageFeed, force: Bool) async {
+        isPublishing = true
+        await publisher.publish(feed, to: preferences.websiteEndpointURL, force: force)
+        publishState = await publisher.state
+        isPublishing = false
+    }
+
+    /// The user's "Publish now": sends the latest feed right away, bypassing
+    /// the interval and backoff; may show a Keychain prompt.
+    func publishNow() async {
+        guard !isPublishing else { return }
+        guard let feed = latestFeed ?? snapshot.map({
+            UsageFeed.build(from: $0, version: Self.appVersion)
+        }) else { return }
+        await publish(feed, force: true)
+    }
+
+    /// Enabled flag or endpoint changed: clear any stop or backoff.
+    func websiteSettingsChanged() async {
+        await publisher.settingsChanged()
+        publishState = await publisher.state
+    }
+
+    /// Stores the token in Netra's own Keychain item (off the main actor).
+    func saveWebsiteToken(_ token: String) async {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let saved = await Task.detached { (try? UsagePublishToken.save(trimmed)) != nil }.value
+        await websiteSettingsChanged()
+        await loadWebsiteStatus()
+        if saved, preferences.websitePublishEnabled { await publishNow() }
+    }
+
+    func clearWebsiteToken() async {
+        _ = await Task.detached { try? UsagePublishToken.delete() }.value
+        await websiteSettingsChanged()
+        await loadWebsiteStatus()
+    }
+
+    /// Refreshes the Settings status line without reading the secret.
+    func loadWebsiteStatus() async {
+        websiteTokenSaved = await Task.detached { UsagePublishToken.exists() }.value
+        publishState = await publisher.state
     }
 
     /// Detects a limit reset and celebrates it immediately. Seeding is silent
