@@ -8,13 +8,14 @@ enum DashboardSection: String, CaseIterable, Identifiable {
     case menuBar
     case limits
     case providers
+    case accounts
     case notifications
     case general
 
     var id: Self { self }
 
     static let overview: [DashboardSection] = [.usage, .subscriptions]
-    static let settings: [DashboardSection] = [.menuBar, .limits, .providers, .notifications, .general]
+    static let settings: [DashboardSection] = [.menuBar, .limits, .providers, .accounts, .notifications, .general]
 
     var title: String {
         switch self {
@@ -23,6 +24,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .menuBar: "Menu Bar & Popover"
         case .limits: "Limits"
         case .providers: "Providers"
+        case .accounts: "Accounts"
         case .notifications: "Notifications"
         case .general: "General"
         }
@@ -35,6 +37,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .menuBar: "What the menu-bar label and popover show"
         case .limits: "How limit bars, resets, and pace read"
         case .providers: "Which agents appear, and optional account connections"
+        case .accounts: "Switch Claude Code and Codex between your accounts"
         case .notifications: "When Netra should get your attention"
         case .general: "Startup and small delights"
         }
@@ -47,6 +50,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .menuBar: "menubar.rectangle"
         case .limits: "slider.horizontal.below.rectangle"
         case .providers: "square.stack.3d.up"
+        case .accounts: "person.2.fill"
         case .notifications: "bell.badge"
         case .general: "gearshape"
         }
@@ -59,6 +63,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .menuBar: .indigo
         case .limits: .teal
         case .providers: .purple
+        case .accounts: .green
         case .notifications: .red
         case .general: .gray
         }
@@ -79,6 +84,7 @@ struct DashboardView: View {
     @Bindable var store: UsageStore
     @Bindable var preferences: AppPreferences
     @Bindable var navigation: DashboardNavigation
+    var accounts: AccountStore? = nil
 
     var body: some View {
         NavigationSplitView {
@@ -96,7 +102,13 @@ struct DashboardView: View {
             case .usage:
                 DashboardUsageView(store: store)
             case .subscriptions:
-                DashboardSubscriptionsView(store: store, preferences: preferences, navigation: navigation)
+                DashboardSubscriptionsView(
+                    store: store, preferences: preferences, navigation: navigation, accounts: accounts
+                )
+            case .accounts:
+                if let accounts {
+                    DashboardAccountsView(accounts: accounts, store: store, preferences: preferences)
+                }
             default:
                 DashboardSettingsView(section: navigation.selection, preferences: preferences, store: store)
             }

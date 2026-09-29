@@ -357,6 +357,8 @@ struct CodexQuota: Codable, Sendable {
         case live
         /// The last `rate_limits` snapshot in a session rollout.
         case sessionLog
+        /// Netra's own record for this account, shown until a fresh read.
+        case lastSeen
     }
 
     var windows: [QuotaWindow]
@@ -369,6 +371,9 @@ struct CodexQuota: Codable, Sendable {
     var resetCreditsAvailable: Int? = nil
     /// The banked credits themselves, when the server lists them.
     var resetCredits: [LimitResetCredit]? = nil
+    /// `AccountIdentity.key` of the account these limits belong to, when
+    /// known. A previous quota is only reused for the same account.
+    var accountKey: String? = nil
 
     /// Windows with a known reset remain usable until that reset. Older Codex
     /// events sometimes omit the reset timestamp; keep those briefly only when

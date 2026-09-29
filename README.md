@@ -124,6 +124,41 @@ overrides fetched once. Each refresh also compares every model-month against
 tokens × list price (a weekly-refreshed LiteLLM snapshot) and logs any cost
 more than 25% below or 2.5× above it under the `pricing` log category.
 
+## Multiple Claude Code and Codex accounts
+
+Netra can switch Claude Code and Codex between your accounts with one click,
+while everything else stays shared: MCP servers and their logins, settings,
+plugins, skills, hooks, projects, and history. Only the sign-in changes.
+
+- **Set up:** Settings → **Accounts** → **Save Current Account**, then
+  **Add Account…**. Adding opens Terminal and runs `claude auth login` (or
+  `codex login`) inside a private, temporary folder, so the account you are
+  using is never signed out. Netra imports the new sign-in as soon as it
+  lands and deletes the temporary copy.
+- **Switch:** click the account name beside a provider's plan badge in the
+  popover, or the switch button on a parked account's row. New sessions use
+  the new account at once; sessions already running keep the previous one
+  until they restart (the popover says how many are running).
+- **See every account:** parked accounts show their 5-hour and weekly limits
+  with how old the reading is, and "reset" once a window has rolled over.
+  Parked Claude accounts are re-read only while their saved access token is
+  still valid; parked Codex accounts are read through the Codex CLI in a
+  private temporary `CODEX_HOME` every 15 minutes.
+
+How it works: for Claude Code, Netra replaces only the account's part of the
+`Claude Code-credentials` Keychain item (keeping MCP logins and plugin
+secrets) and the `oauthAccount` profile in `~/.claude.json` (clearing Claude
+Code's own account-scoped caches), while holding Claude Code's lock files so
+it can never collide with a token refresh. For Codex it replaces
+`~/.codex/auth.json` and restarts the shared `codex app-server daemon` only if
+one is running. The displaced sign-in is always saved first. Saved sign-ins
+are stored only in your login Keychain under **Netra Account Vault** — never
+on disk, never sent anywhere. Netra never signs you out and never renews a
+Claude sign-in itself, so switch to a parked Claude account every few weeks
+(Claude Code sign-ins last about 30 days); Netra warns when one is close.
+Codex accounts that keep credentials in the system keyring
+(`cli_auth_credentials_store = "keyring"`) can't be switched.
+
 **Lock & Sleep** locks the screen immediately and puts the Mac to sleep.
 **Keep awake** blocks idle sleep only — the display still sleeps, and closing
 the lid still sleeps the Mac.
@@ -219,6 +254,8 @@ pinned binary against synthetic logs in `PinnedCCUsageTests`) — or set
   - `AppPreferences.swift` / `UsageAlerts.swift` — persisted display choices and threshold notifications
   - `AwakeController.swift` — IOKit sleep assertion (manual/timed), lock & sleep
   - `MenuView.swift` / `LimitsViews.swift` / `LimitSummary.swift` — the popover UI and limit/pace text rules
+  - `Account*.swift`, `ClaudeAccountSession.swift`, `CodexAccountSession.swift` — multi-account roster, Keychain vault, and the Claude Code / Codex sign-in swap
+  - `AccountsViews.swift` / `DashboardAccountsView.swift` — account switcher in the popover and the Accounts settings page
 - `ccusage-bin` — pinned ccusage 20.0.24 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
 - `VERSION` — next app-bundle version used by local builds (publishing remains explicit)
 - `fixtures/` — captured real JSON output + benchmark notes

@@ -37,6 +37,16 @@ instructions.
   folder. `JSONValue.swift` holds the shared lenient JSON/ISO-date readers.
 - `LimitSummary.swift` normalizes every provider's limit windows (and the
   pace/reset text rules) for both the popover and the menu-bar icon.
+- Multi-account switching for Claude Code and Codex lives in the `Account*`
+  files: `AccountModels.swift` (roster and identities, no secrets),
+  `AccountVault.swift` (Netra's own Keychain items via `/usr/bin/security`,
+  plus the small `ProcessRunner`),
+  `ClaudeAccountSession.swift` and `CodexAccountSession.swift` (each CLI's live
+  sign-in, locks, and swap), `AccountSwitcher.swift` (the serialized actor that
+  performs captures, switches, sign-ins, and parked-limit reads), and
+  `AccountStore.swift` (the `@MainActor` facade the UI observes).
+  `AccountsViews.swift` and `DashboardAccountsView.swift` are the popover and
+  Settings surfaces.
 - `AwakeController.swift`, `LaunchAtLogin.swift`, and `UpdateChecker.swift` wrap
   macOS or distribution services.
 - `Tests/NetraTests/` contains XCTest contract tests and captured fixtures for
@@ -61,9 +71,45 @@ instructions.
 - Keep transport DTOs separate from normalized UI/persistence models. When an
   external JSON or JSONL shape changes, update the adapter and add or update a
   captured fixture plus a contract test.
-- Never log, persist, fixture, or expose real OAuth tokens, Keychain payloads,
-  personal session contents, or other secrets. Test credentials must be
-  unmistakably synthetic.
+- Never log, fixture, or expose real OAuth tokens, Keychain payloads, personal
+  session contents, or other secrets, and never write them to Netra's files.
+  The one approved exception is the account vault: sign-ins of Claude Code and
+  Codex accounts the user chose to manage are stored only in the macOS Keychain
+  under Netra's own service (`AccountVault`), so a parked account can be
+  switched back in. Test credentials must be unmistakably synthetic.
+- Account switching keeps ONE shared configuration (MCP servers and their
+  logins, settings, plugins, skills, projects, history) and swaps only the
+  account-owned identity. Rules, verified against Claude Code 2.1.284 and Codex
+  0.158 (see the research notes in the switcher files):
+  - Never run `claude auth logout`, `/logout`, or `codex logout`: they revoke
+    tokens server-side, and Claude's deletes the whole Keychain item including
+    every MCP login. Add accounts by signing in under a private temporary
+    `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, importing, and deleting the temp copy.
+  - Claude: replace only the account-owned keys of the `Claude Code-credentials`
+    item (`claudeAiOauth`, `organizationUuid`, `trustedDeviceToken`,
+    `designOauth`); keep everything else, such as `mcpOAuth` and
+    `pluginSecrets`. In `~/.claude.json` set `oauthAccount` and remove Claude's
+    own logout-list caches; never write a whole saved config back, and refuse to
+    write over a file that does not parse. Hold Claude's lock directories
+    (`.oauth_refresh.lock`, `~/.claude.lock`, `~/.claude.json.lock`) for the
+    whole mutation, with no network work while they are held.
+  - Write Keychain items through `/usr/bin/security` exactly as Claude Code
+    does: the payload hex-encoded on a `security -i` stdin line when it fits
+    Claude Code's 4032-byte limit, argv otherwise. Never write them through
+    Security.framework (a framework write re-stamps the item's partition list
+    and locks Claude Code out of its own sign-in).
+  - Always capture the live sign-in into the vault immediately before switching
+    away, and never install a vault copy over the account that is already live:
+    refresh tokens rotate, and a stale copy is a dead sign-in.
+  - Netra never calls Anthropic's OAuth token endpoint. Parked Claude accounts
+    show their last known limits (a still-valid access token may be used for
+    the usage endpoint only). Parked Codex accounts may be read by running the
+    Codex CLI's own `codex app-server` in a private temporary `CODEX_HOME`;
+    tokens it rotates go straight back into the vault.
+  - Codex: `~/.codex/auth.json` is the whole identity. Write it with a temp file
+    and `rename`, verify `tokens.account_id` afterwards, and restart the shared
+    `codex app-server daemon` only when `daemon version` says it is running.
+  - No automatic account rotation to get around limits.
 - Keep `ccusage-bin` pinned and offline-first. Do not replace or upgrade the
   binary, change its license bundle, or alter pricing provenance without
   explicit approval and contract verification.
@@ -103,6 +149,12 @@ Run commands from the repository root.
 - `zsh -n run.sh scripts/build-app.sh scripts/release.sh` — syntax-check shell
   scripts after editing them.
 - `git diff --check` — check every change for whitespace errors.
+- `NETRA_RENDER_DIR=/tmp/netra-previews swift test --filter AccountsRenderPreview`
+  — render the account switcher (popover, Accounts page, Subscriptions) with
+  synthetic accounts. `NETRA_ACCOUNTS_LIVE=1 swift test --filter
+  AccountsLiveProbe` probes the real `security` tool on a throwaway item and
+  reads (never writes) the live sign-ins. No test may write Claude Code's or
+  Codex's real sign-in; switching tests use temp homes and in-memory stores.
 - `./run.sh` — build, sign, and restart the live menu-bar app. Use it only when
   interactive UI verification is appropriate; it terminates any running Netra
   development process.

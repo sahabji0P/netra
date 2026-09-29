@@ -26,11 +26,17 @@ struct NetraApp: App {
     @State private var updates = UpdateChecker()
     @State private var dashboardNavigation = DashboardNavigation()
     @State private var desktopConfetti = DesktopConfetti()
+    @State private var accounts: AccountStore
 
     init() {
         let preferences = AppPreferences()
         let confetti = DesktopConfetti()
-        let store = UsageStore(preferences: preferences)
+        let accounts = AccountStore()
+        let store = UsageStore(preferences: preferences, accounts: accounts)
+        // A switch refreshes limits at once, for the account now signed in.
+        accounts.onSwitch = { [weak store] provider in
+            await store?.accountDidSwitch(provider)
+        }
         // Fire full-screen confetti the moment a reset is detected, unless the
         // user has turned it off.
         store.celebrationHandler = { [weak preferences, weak confetti] celebration in
@@ -40,6 +46,7 @@ struct NetraApp: App {
         _preferences = State(initialValue: preferences)
         _store = State(initialValue: store)
         _desktopConfetti = State(initialValue: confetti)
+        _accounts = State(initialValue: accounts)
     }
 
     var body: some Scene {
@@ -49,7 +56,8 @@ struct NetraApp: App {
                 awake: awake,
                 updates: updates,
                 preferences: preferences,
-                dashboardNavigation: dashboardNavigation
+                dashboardNavigation: dashboardNavigation,
+                accounts: accounts
             )
         } label: {
             if preferences.menuBarDisplayMode == .limitBars, let bars = menuBarLimitBars {
@@ -69,7 +77,8 @@ struct NetraApp: App {
             DashboardView(
                 store: store,
                 preferences: preferences,
-                navigation: dashboardNavigation
+                navigation: dashboardNavigation,
+                accounts: accounts
             )
         }
         .defaultSize(width: 980, height: 720)

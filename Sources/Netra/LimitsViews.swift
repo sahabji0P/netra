@@ -12,7 +12,12 @@ extension MenuView {
     var limitsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(limitCards) { limits in
-                limitCard(limits)
+                VStack(alignment: .leading, spacing: 10) {
+                    limitCard(limits)
+                    // Outside the card so its buttons keep their own hover,
+                    // clicks, and accessibility.
+                    parkedAccountsStrip(for: limits.agent)
+                }
             }
             if let reason = missingClaudeLimitsReason {
                 missingClaudeCard(reason)
@@ -58,6 +63,7 @@ extension MenuView {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1.5)
                     .background(.quaternary.opacity(0.6), in: Capsule())
+                accountChip(for: "claude")
             }
             Text(reason)
                 .font(.system(size: 11))
@@ -83,6 +89,7 @@ extension MenuView {
                     .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 Text(AgentPalette.shortName(limits.agent))
                     .font(.system(size: 13, weight: .semibold))
+                    .fixedSize()
                 if let badge = limits.isEstimate ? "estimate" : limits.plan.map(planBadge) {
                     Text(badge)
                         .font(.system(size: 10, weight: .medium))
@@ -90,13 +97,21 @@ extension MenuView {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1.5)
                         .background(.quaternary.opacity(0.6), in: Capsule())
+                        .fixedSize()
                 }
+                accountChip(for: limits.agent)
                 Spacer(minLength: 8)
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    Text(freshness(limits, now: context.date))
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    // The account chip can crowd the header; keep the age
+                    // and drop the source before anything truncates.
+                    ViewThatFits(in: .horizontal) {
+                        Text(freshness(limits, now: context.date))
+                        Text(limits.observedAt.map { Format.age(since: $0, now: context.date) } ?? limits.source)
+                            .help(limits.source)
+                    }
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 }
             }
             ForEach(limits.windows, id: \.self) { window in
