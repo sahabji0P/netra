@@ -208,3 +208,37 @@ extension UsageFeed {
         daily.reduce(0) { total, day in total + day.agents.values.reduce(0) { $0 + $1.tokens } }
     }
 }
+
+// MARK: - Local file
+
+/// Writes the feed to `~/Library/Application Support/Netra/usage-feed.json`
+/// after every successful refresh, publishing on or off. Building and writing
+/// happen on this actor, off the main actor; the write is atomic, so readers
+/// (the site's `npm run usage`) never see a partial file.
+actor UsageFeedFile {
+    static var defaultURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Netra", isDirectory: true)
+            .appendingPathComponent("usage-feed.json")
+    }
+
+    private let url: URL
+
+    init(url: URL = UsageFeedFile.defaultURL) {
+        self.url = url
+    }
+
+    /// Builds and writes the feed; returns it for publishing. A write failure
+    /// is not a refresh failure: the feed is still returned.
+    @discardableResult
+    func write(_ snapshot: UsageSnapshot, version: String, calendar: Calendar = .current) -> UsageFeed {
+        let feed = UsageFeed.build(from: snapshot, version: version, calendar: calendar)
+        if let data = try? feed.encoded() {
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try? data.write(to: url, options: .atomic)
+        }
+        return feed
+    }
+}
