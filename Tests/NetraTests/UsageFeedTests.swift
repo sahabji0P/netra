@@ -219,3 +219,22 @@ final class UsageFeedTests: XCTestCase {
         XCTAssertEqual(feed.totalTokens, 0)
     }
 }
+
+final class UsageFeedFileTests: XCTestCase {
+    func testWritesDeterministicFeedAtomicallyToTheGivenURL() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NetraTests.UsageFeedFile.\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("nested/usage-feed.json")
+        let snapshot = UsageSnapshot(
+            fetchedAt: Date(timeIntervalSince1970: 0), report: CCUnifiedReport(daily: [], weekly: [], monthly: []),
+            activeBlock: nil, codexQuota: nil, claudeQuota: nil
+        )
+
+        let feed = await UsageFeedFile(url: url).write(snapshot, version: "t")
+        let written = try Data(contentsOf: url)
+        XCTAssertEqual(written, try feed.encoded())
+        XCTAssertEqual(try JSONDecoder().decode(UsageFeed.self, from: written), feed)
+        XCTAssertEqual(feed.generatedAt, "1970-01-01T00:00:00Z")
+    }
+}

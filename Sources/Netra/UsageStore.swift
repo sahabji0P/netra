@@ -59,14 +59,22 @@ final class UsageStore {
     private let liveQuotaMaxAge: TimeInterval = 5 * 60
     private var codexLiveAttemptedAt: Date?
     private let cursorEventStore = CursorEventStore()
+    private let feedFile: UsageFeedFile
+
+    /// The app's marketing version; "dev" for unbundled `swift run` builds.
+    nonisolated static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
 
     init(
         preferences: AppPreferences = AppPreferences(),
         alerts: UsageAlertController? = nil,
         celebrations: ResetCelebrationStore = ResetCelebrationStore(),
+        feedFile: UsageFeedFile = UsageFeedFile(),
         startsAutomatically: Bool = true
     ) {
         self.preferences = preferences
+        self.feedFile = feedFile
         self.alerts = alerts ?? UsageAlertController()
         self.celebrations = celebrations
         guard startsAutomatically else { return }
@@ -193,6 +201,7 @@ final class UsageStore {
                 snapshot = fresh
                 state = .fresh
                 await cache.save(fresh)
+                exportFeed(from: fresh)
                 detectResetCelebration(in: fresh)
                 let alertConfiguration = preferences.alertConfiguration
                 Task {
@@ -209,6 +218,16 @@ final class UsageStore {
         refreshTask = task
         await task.value
         refreshTask = nil
+    }
+
+    /// Writes the public usage feed for a successful snapshot. Runs beside
+    /// the refresh and never blocks or fails it; only successful refreshes
+    /// reach here, so a failure never replaces the last good feed.
+    private func exportFeed(from snapshot: UsageSnapshot) {
+        let version = Self.appVersion
+        Task { [feedFile] in
+            await feedFile.write(snapshot, version: version)
+        }
     }
 
     /// Detects a limit reset and celebrates it immediately. Seeding is silent
