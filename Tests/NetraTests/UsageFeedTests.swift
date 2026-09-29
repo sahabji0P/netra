@@ -99,13 +99,50 @@ final class UsageFeedTests: XCTestCase {
         XCTAssertTrue(String(decoding: try feed.encoded(), as: UTF8.self).contains("\"netra.usage-feed/1\""))
     }
 
-    func testTokensAreRecomputedFromPartsWhenTotalDisagrees() throws {
-        // ccusage can report a totalTokens above the four parts (e.g. reasoning).
+    func testReportedTotalAbovePartsCountsTheExcessAsOutput() throws {
+        // ccusage counts reasoning tokens in totalTokens but in no part; the
+        // site counts them as output. Agent-level excess no model reports
+        // goes to the agent's unknown model.
         let opencode = agent("opencode", input: 100, output: 50, read: 1000, write: 0, total: 1_200, cost: 0.1, models: [
             model("test-model", input: 100, output: 50, read: 1000, write: 0, cost: 0.1),
         ])
         let feed = UsageFeed.build(from: snapshot([row("2026-09-22", [opencode])]), version: "t", calendar: utc)
-        XCTAssertEqual(feed.daily.first?.agents["opencode"]?.tokens, 1_150)
+        let entry = try XCTUnwrap(feed.daily.first?.agents["opencode"])
+        XCTAssertEqual(entry.output, 100)
+        XCTAssertEqual(entry.tokens, 1_200, "matches the reported total")
+        XCTAssertEqual(entry.models["test-model"]?.output, 50)
+        XCTAssertEqual(entry.models["unknown"]?.output, 50)
+        XCTAssertEqual(entry.models["unknown"]?.tokens, 50)
+        XCTAssertEqual(entry.models["unknown"]?.input, 0)
+        XCTAssertEqual(feed.totalTokens, 1_200)
+        assertInvariants(feed)
+    }
+
+    func testModelTotalAbovePartsCountsTheExcessAsModelOutput() throws {
+        var reasoning = model("test-model", input: 10, output: 5, read: 0, write: 0, cost: 0.2)
+        reasoning.totalTokens = 40 // 25 reasoning tokens in no part
+        let hermes = agent("hermes", input: 10, output: 5, read: 0, write: 0, total: 40, cost: 0.2,
+                           models: [reasoning])
+        let feed = UsageFeed.build(from: snapshot([row("2026-09-22", [hermes])]), version: "t", calendar: utc)
+        let entry = try XCTUnwrap(feed.daily.first?.agents["hermes"])
+        XCTAssertEqual(entry.models["test-model"]?.output, 30)
+        XCTAssertEqual(entry.models["test-model"]?.tokens, 40)
+        XCTAssertNil(entry.models["unknown"], "the model already accounts for the excess")
+        XCTAssertEqual(entry.output, 30)
+        XCTAssertEqual(entry.tokens, 40)
+        assertInvariants(feed)
+    }
+
+    func testReportedTotalBelowPartsKeepsTheParts() throws {
+        var low = model("test-model", input: 100, output: 50, read: 1000, write: 0, cost: 0.1)
+        low.totalTokens = 900
+        let codex = agent("codex", input: 100, output: 50, read: 1000, write: 0, total: 900, cost: 0.1, models: [low])
+        let feed = UsageFeed.build(from: snapshot([row("2026-09-22", [codex])]), version: "t", calendar: utc)
+        let entry = try XCTUnwrap(feed.daily.first?.agents["codex"])
+        XCTAssertEqual(entry.output, 50)
+        XCTAssertEqual(entry.tokens, 1_150)
+        XCTAssertEqual(entry.models["test-model"]?.tokens, 1_150)
+        XCTAssertNil(entry.models["unknown"])
         assertInvariants(feed)
     }
 
