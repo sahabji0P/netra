@@ -46,7 +46,8 @@ you can filter by provider. **Subscriptions** shows every provider's limit
 windows, pace, and provider-specific detail (Cursor's billing cycle per model,
 Codex reset credits). Both always cover **every** provider found in your logs.
 Settings are grouped into **Menu Bar & Popover**, **Limits**, **Providers**,
-**Notifications**, and **General**. The menu-bar popover is the curated view:
+**Notifications**, and **General** (which includes the opt-in **Website**
+publishing described below). The menu-bar popover is the curated view:
 **Providers** lets you toggle which providers appear there (hidden providers
 are removed from the popover's totals too, so its numbers stay consistent).
 
@@ -126,6 +127,39 @@ more than 25% below or 2.5× above it under the `pricing` log category.
 **Lock & Sleep** locks the screen immediately and puts the Mac to sleep.
 **Keep awake** blocks idle sleep only — the display still sleeps, and closing
 the lid still sleeps the Mac.
+
+## Usage feed and website publishing
+
+After every successful refresh Netra writes a usage feed to
+`~/Library/Application Support/Netra/usage-feed.json` (schema
+`netra.usage-feed/1`). A failed refresh never replaces it. The feed holds
+aggregates only: per day (in your Mac's time zone), per agent and per model,
+the input, output, cache-read, and cache-write token counts, their total, and
+the estimated API-equivalent cost, plus the time of the refresh and Netra's
+version. It never contains project names, paths, prompts, account ids, or
+tokens.
+
+Netra can also push that feed to your own website. This is **off** by default.
+To turn it on, open **Settings → General → Website**:
+
+1. Enter the site's ingest **Endpoint**, e.g. `https://example.com/api/usage`.
+   It must be `https://`; plain `http://` is accepted only for `localhost` and
+   `127.0.0.1` while you develop the site.
+2. Paste the shared secret into **Token** and click **Save**. It is stored in
+   Netra's own Keychain item (`com.sahabji0P.netra.usage-feed`), never in
+   preferences or logs, and only sent to that endpoint as
+   `Authorization: Bearer <token>`. **Clear** deletes it.
+3. Switch on **Publish usage to a website**.
+
+Netra then POSTs the feed as JSON at most once every 5 minutes, and skips the
+upload when the figures haven't changed since the last success unless that
+was over an hour ago. Network errors, rate limits (429), and server errors
+retry with a backoff from 30 seconds up to 30 minutes. A rejected token (401)
+or a rejected feed (413/422) stops publishing until you change the settings
+(or, for a rejected feed, update Netra); the status line under the settings
+shows the last successful upload or the problem in plain words. **Publish
+now** sends the current feed immediately. Publishing never delays or fails a
+usage refresh.
 
 ## Upgrade
 
