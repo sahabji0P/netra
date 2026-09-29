@@ -88,8 +88,12 @@ extension UsageFeed {
     /// app version and the calendar Netra bucketed the snapshot's days in.
     ///
     /// Invariants enforced here rather than trusted from ccusage:
-    /// - `tokens` is recomputed from the four parts (ccusage's `totalTokens`
-    ///   can include extra categories, e.g. reasoning tokens for OpenCode).
+    /// - `tokens` is always the sum of the four parts. When ccusage reports a
+    ///   larger `totalTokens` (reasoning tokens for OpenCode and Hermes, which
+    ///   it counts in the total but in no part), the excess is added to
+    ///   `output`, as the site counts reasoning as output; a smaller total
+    ///   keeps the parts. Excess the agent reports beyond its models' own
+    ///   lands in the agent's `unknown` model.
     /// - An agent's models sum to the agent: parts no model accounts for go to
     ///   a model named `unknown`; if models over-count a part, the agent is
     ///   raised to the model sum so no tokens disappear.
@@ -135,18 +139,29 @@ extension UsageFeed {
         var models: [String: Figures] = [:]
         for model in stat.models {
             let figures = Figures(
-                input: model.inputTokens, output: model.outputTokens,
+                input: model.inputTokens,
+                output: model.outputTokens + unreportedTokens(
+                    total: model.totalTokens, model.inputTokens, model.outputTokens,
+                    model.cacheReadTokens, model.cacheCreationTokens),
                 cacheRead: model.cacheReadTokens, cacheWrite: model.cacheCreationTokens,
                 cost: model.cost
             )
             models[model.name] = models[model.name].map { $0 + figures } ?? figures
         }
         let reported = Figures(
-            input: stat.inputTokens, output: stat.outputTokens,
+            input: stat.inputTokens,
+            output: stat.outputTokens + unreportedTokens(
+                total: stat.totalTokens, stat.inputTokens, stat.outputTokens,
+                stat.cacheReadTokens, stat.cacheCreationTokens),
             cacheRead: stat.cacheReadTokens, cacheWrite: stat.cacheCreationTokens,
             cost: stat.cost
         )
         return reconciled(reported, models: models)
+    }
+
+    /// Tokens a reported total counts beyond its four parts (never negative).
+    private static func unreportedTokens(total: Int, _ parts: Int...) -> Int {
+        max(0, total - parts.reduce(0, +))
     }
 
     /// Makes the models sum exactly to the agent (tokens) and to within float
