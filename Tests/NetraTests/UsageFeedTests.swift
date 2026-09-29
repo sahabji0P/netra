@@ -200,6 +200,22 @@ final class UsageFeedTests: XCTestCase {
         XCTAssertEqual(first.contentHash(), second.contentHash())
     }
 
+    func testCostSumsDoNotDependOnModelOrder() throws {
+        // Enough models that dictionary iteration order differs from input
+        // order; float sums must still be byte-identical.
+        let models = (1...40).map {
+            model("test-model-\($0)", input: $0, output: 0, read: 0, write: 0, cost: 0.1 * Double($0) + 0.000_3)
+        }
+        let cost = models.reduce(0) { $0 + $1.cost } + 0.7
+        let forward = agent("claude", input: 900, output: 0, read: 0, write: 0, cost: cost, models: models)
+        var backward = forward
+        backward.models.reverse()
+        let a = UsageFeed.build(from: snapshot([row("2026-09-22", [forward])]), version: "t", calendar: utc)
+        let b = UsageFeed.build(from: snapshot([row("2026-09-22", [backward])]), version: "t", calendar: utc)
+        XCTAssertEqual(try a.encoded(), try b.encoded())
+        assertInvariants(a)
+    }
+
     func testContentHashIgnoresGeneratedAtOnly() throws {
         let a = agent("claude", input: 1, output: 2, read: 3, write: 4, cost: 0.1, models: [
             model("test-model", input: 1, output: 2, read: 3, write: 4, cost: 0.1),

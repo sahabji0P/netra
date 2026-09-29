@@ -152,7 +152,7 @@ extension UsageFeed {
     /// Makes the models sum exactly to the agent (tokens) and to within float
     /// noise (cost), never dropping tokens from either side.
     private static func reconciled(_ reported: Figures, models: [String: Figures]) -> Agent {
-        let modelSum = models.values.reduce(Figures.zero, +)
+        let modelSum = sum(models)
         let remainder = Figures(
             input: reported.input - modelSum.input,
             output: reported.output - modelSum.output,
@@ -164,8 +164,13 @@ extension UsageFeed {
         if remainder.hasUsage {
             models[remainderModel] = models[remainderModel].map { $0 + remainder } ?? remainder
         }
-        let agent = models.values.reduce(Figures.zero, +)
-        return Agent(agent, models: models)
+        return Agent(sum(models), models: models)
+    }
+
+    /// Sums in key order: Dictionary order varies per process, and float
+    /// addition is order-sensitive, so this keeps costs byte-stable.
+    private static func sum(_ models: [String: Figures]) -> Figures {
+        models.sorted { $0.key < $1.key }.reduce(Figures.zero) { $0 + $1.value }
     }
 
     private static func merge(_ lhs: Agent, _ rhs: Agent) -> Agent {
