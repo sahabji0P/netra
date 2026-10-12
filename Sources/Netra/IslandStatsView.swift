@@ -248,6 +248,9 @@ struct IslandStatsStrip: View {
     /// block countdown stays current.
     var now: Date? = nil
     var calendar: Calendar = .current
+    /// Off where the surrounding view already headlines today's cost and
+    /// tokens; the tile then shows only the comparison with the average.
+    var showsTodayTotals = true
 
     private var model: IslandStatsModel {
         IslandStatsModel(
@@ -280,16 +283,18 @@ struct IslandStatsStrip: View {
 
     private func todayTile(_ today: IslandStatsModel.Today) -> some View {
         tile {
-            caption("Today")
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(Format.cost(today.cost))
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("\(Format.tokens(today.tokens)) tokens")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(IslandTheme.secondaryText)
+            caption(showsTodayTotals ? "Today" : "Today vs 7-day average")
+            if showsTodayTotals {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(Format.cost(today.cost))
+                        .font(.system(size: 26, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("\(Format.tokens(today.tokens)) tokens")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                }
+                .monospacedDigit()
             }
-            .monospacedDigit()
             HStack(spacing: 6) {
                 changeBadge(today.costChange, unit: "cost")
                 changeBadge(today.tokenChange, unit: "tokens")

@@ -11,7 +11,7 @@ enum IslandSurface: CaseIterable, Sendable {
 struct IslandSizes: Equatable, Sendable {
     /// Width of each "wing" beside the notch in the resting state (provider
     /// mark + ring on the left, today's cost on the right).
-    var wingWidth: CGFloat = 76
+    var wingWidth: CGFloat = 92
     /// Extra width and height the resting shape grows by on hover.
     var peekGrowth = CGSize(width: 24, height: 6)
     var expanded = CGSize(width: 640, height: 480)

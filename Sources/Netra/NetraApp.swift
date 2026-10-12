@@ -22,24 +22,33 @@ struct NetraApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var preferences: AppPreferences
     @State private var store: UsageStore
-    @State private var awake = AwakeController()
     @State private var updates = UpdateChecker()
-    @State private var dashboardNavigation = DashboardNavigation()
     @State private var desktopConfetti = DesktopConfetti()
     @State private var accounts: AccountStore
+    @State private var awake: AwakeController
+    @State private var dashboardNavigation: DashboardNavigation
+    @State private var island: IslandCoordinator
 
     init() {
         let preferences = AppPreferences()
         let confetti = DesktopConfetti()
         let accounts = AccountStore()
+        let awake = AwakeController()
+        let navigation = DashboardNavigation()
         let store = UsageStore(preferences: preferences, accounts: accounts)
+        let island = IslandCoordinator(
+            store: store, preferences: preferences, accounts: accounts,
+            awake: awake, dashboardNavigation: navigation
+        )
         // A switch refreshes limits at once, for the account now signed in.
-        accounts.onSwitch = { [weak store] provider in
+        accounts.onSwitch = { [weak store, weak island] provider in
+            island?.accountSwitched(provider)
             await store?.accountDidSwitch(provider)
         }
         // Fire full-screen confetti the moment a reset is detected, unless the
-        // user has turned it off.
-        store.celebrationHandler = { [weak preferences, weak confetti] celebration in
+        // user has turned it off; the island shows the reset either way.
+        store.celebrationHandler = { [weak preferences, weak confetti, weak island] celebration in
+            island?.resetDetected(celebration)
             guard preferences?.confettiOnReset == true else { return }
             confetti?.play(title: celebration.title)
         }
@@ -47,6 +56,11 @@ struct NetraApp: App {
         _store = State(initialValue: store)
         _desktopConfetti = State(initialValue: confetti)
         _accounts = State(initialValue: accounts)
+        _awake = State(initialValue: awake)
+        _dashboardNavigation = State(initialValue: navigation)
+        _island = State(initialValue: island)
+        // The panel needs a finished launch; the main queue runs after it.
+        DispatchQueue.main.async { island.start() }
     }
 
     var body: some Scene {
@@ -60,16 +74,19 @@ struct NetraApp: App {
                 accounts: accounts
             )
         } label: {
-            if preferences.menuBarDisplayMode == .limitBars, let bars = menuBarLimitBars {
-                Image(nsImage: MenuBarIcon.bars(
-                    top: bars.top, bottom: bars.bottom, awake: awake.isAwake
-                ))
-            } else {
-                Image(systemName: awake.isAwake ? "eye.fill" : "eye")
+            Group {
+                if preferences.menuBarDisplayMode == .limitBars, let bars = menuBarLimitBars {
+                    Image(nsImage: MenuBarIcon.bars(
+                        top: bars.top, bottom: bars.bottom, awake: awake.isAwake
+                    ))
+                } else {
+                    Image(systemName: awake.isAwake ? "eye.fill" : "eye")
+                }
+                if let status = menuBarStatus {
+                    Text(status)
+                }
             }
-            if let status = menuBarStatus {
-                Text(status)
-            }
+            .modifier(IslandWindowBridge(island: island))
         }
         .menuBarExtraStyle(.window)
 
@@ -170,5 +187,16 @@ enum MenuBarIcon {
         image.isTemplate = true
         image.accessibilityDescription = "Usage limits"
         return image
+    }
+}
+
+/// Hands the island the scene's `openWindow`, which its panel cannot get on
+/// its own. Lives in the always-present menu-bar label.
+private struct IslandWindowBridge: ViewModifier {
+    let island: IslandCoordinator
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onAppear { island.openWindow = openWindow }
     }
 }

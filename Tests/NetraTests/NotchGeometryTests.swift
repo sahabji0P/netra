@@ -84,7 +84,7 @@ final class NotchGeometryTests: XCTestCase {
     func testRestingWingsSitBesideTheNotch() {
         let layout = NotchGeometry.layout(for: notched)
         let resting = NotchGeometry.islandFrame(.resting, layout: layout, sizes: sizes)
-        XCTAssertEqual(resting, CGRect(x: 662 - 76, y: 950, width: 188 + 152, height: 32))
+        XCTAssertEqual(resting, CGRect(x: 662 - sizes.wingWidth, y: 950, width: 188 + 2 * sizes.wingWidth, height: 32))
     }
 
     func testNarrowScreenClampsInsideMargins() {

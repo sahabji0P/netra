@@ -68,6 +68,7 @@ final class AppPreferences {
         static let claudeQuotaEnabled = "preferences.limits.claudeQuotaEnabled"
         static let cursorUsageEnabled = "preferences.limits.cursorUsageEnabled"
         static let confettiOnReset = "preferences.celebrate.confettiOnReset"
+        static let notchIslandEnabled = "preferences.island.enabled"
         static let dailyTokenAlertEnabled = "preferences.alerts.dailyTokens.enabled"
         static let dailyTokenAlertThreshold = "preferences.alerts.dailyTokens.threshold"
         static let providerLimitAlertEnabled = "preferences.alerts.providerLimit.enabled"
@@ -155,6 +156,11 @@ final class AppPreferences {
     var confettiOnReset: Bool {
         didSet { defaults.set(confettiOnReset, forKey: Key.confettiOnReset) }
     }
+    /// Show the notch island (a centered pill on screens without a notch).
+    /// The menu-bar icon stays either way.
+    var notchIslandEnabled: Bool {
+        didSet { defaults.set(notchIslandEnabled, forKey: Key.notchIslandEnabled) }
+    }
 
     /// Opt-in: push the usage feed (daily aggregates only) to the owner's
     /// website after refreshes. The token lives in the Keychain, not here.
@@ -218,6 +224,7 @@ final class AppPreferences {
         claudeQuotaEnabled = defaults.object(forKey: Key.claudeQuotaEnabled) as? Bool ?? false
         cursorUsageEnabled = defaults.object(forKey: Key.cursorUsageEnabled) as? Bool ?? false
         confettiOnReset = defaults.object(forKey: Key.confettiOnReset) as? Bool ?? true
+        notchIslandEnabled = defaults.object(forKey: Key.notchIslandEnabled) as? Bool ?? true
         websitePublishEnabled = defaults.object(forKey: Key.websitePublishEnabled) as? Bool ?? false
         websiteEndpoint = defaults.string(forKey: Key.websiteEndpoint) ?? ""
         dailyTokenAlertEnabled = defaults.object(forKey: Key.dailyTokenAlertEnabled) as? Bool ?? false

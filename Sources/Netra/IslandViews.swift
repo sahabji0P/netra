@@ -174,6 +174,8 @@ struct IslandCompactContent: View {
                      : IslandText.percent(tightest.window.usedPercent))
                     .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
                     .foregroundStyle(tightest.window.usedPercent >= 90 ? IslandTheme.critical : .white)
             } else {
                 Image(systemName: "gauge.with.dots.needle.33percent")
@@ -200,6 +202,8 @@ struct IslandCompactContent: View {
             Text(today.map { Format.cost($0.cost) } ?? "—")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(today == nil ? IslandTheme.secondaryText : isWarning ? IslandTheme.warning : .white)
                 .contentTransition(.numericText())
                 .accessibilityLabel("Today \(today.map { Format.cost($0.cost) } ?? "no data")")
@@ -409,7 +413,7 @@ struct IslandExpandedContent: View {
                     )
                 }
                 if let snapshot {
-                    IslandStatsStrip(snapshot: snapshot, preferences: preferences)
+                    IslandStatsStrip(snapshot: snapshot, preferences: preferences, showsTodayTotals: false)
                 }
                 if preferences.showsKeepAwake {
                     IslandKeepAwakeRow(awake: awake)

@@ -427,6 +427,13 @@ struct DashboardSettingsView: View {
                     launchAtLogin = LaunchAtLogin.isEnabled
                 }
             }
+            DashboardPanel(title: "Notch island", symbol: "rectangle.topthird.inset.filled") {
+                SettingsRow(
+                    "Show the notch island",
+                    detail: "A live summary around the camera notch (a pill at the top of screens without one). Hover or click to open limits, accounts, and stats; it grows briefly when a limit runs hot, is reached, or resets.",
+                    isOn: $preferences.notchIslandEnabled
+                )
+            }
             DashboardPanel(title: "Celebrations", symbol: "party.popper") {
                 SettingsRow(
                     "Celebrate limit resets",
