@@ -69,6 +69,7 @@ final class AppPreferences {
         static let cursorUsageEnabled = "preferences.limits.cursorUsageEnabled"
         static let confettiOnReset = "preferences.celebrate.confettiOnReset"
         static let notchIslandEnabled = "preferences.island.enabled"
+        static let islandSections = "preferences.island.sections"
         static let dailyTokenAlertEnabled = "preferences.alerts.dailyTokens.enabled"
         static let dailyTokenAlertThreshold = "preferences.alerts.dailyTokens.threshold"
         static let providerLimitAlertEnabled = "preferences.alerts.providerLimit.enabled"
@@ -161,6 +162,18 @@ final class AppPreferences {
     var notchIslandEnabled: Bool {
         didSet { defaults.set(notchIslandEnabled, forKey: Key.notchIslandEnabled) }
     }
+    /// Optional parts of the expanded island the user turned on.
+    var islandSections: Set<IslandSection> {
+        didSet { defaults.set(islandSections.map(\.rawValue).sorted(), forKey: Key.islandSections) }
+    }
+
+    func showsIslandSection(_ section: IslandSection) -> Bool {
+        islandSections.contains(section)
+    }
+
+    func setIslandSection(_ section: IslandSection, _ isOn: Bool) {
+        if isOn { islandSections.insert(section) } else { islandSections.remove(section) }
+    }
 
     /// Opt-in: push the usage feed (daily aggregates only) to the owner's
     /// website after refreshes. The token lives in the Keychain, not here.
@@ -225,6 +238,8 @@ final class AppPreferences {
         cursorUsageEnabled = defaults.object(forKey: Key.cursorUsageEnabled) as? Bool ?? false
         confettiOnReset = defaults.object(forKey: Key.confettiOnReset) as? Bool ?? true
         notchIslandEnabled = defaults.object(forKey: Key.notchIslandEnabled) as? Bool ?? true
+        islandSections = (defaults.stringArray(forKey: Key.islandSections))
+            .map { Set($0.compactMap(IslandSection.init(rawValue:))) } ?? IslandSection.defaults
         websitePublishEnabled = defaults.object(forKey: Key.websitePublishEnabled) as? Bool ?? false
         websiteEndpoint = defaults.string(forKey: Key.websiteEndpoint) ?? ""
         dailyTokenAlertEnabled = defaults.object(forKey: Key.dailyTokenAlertEnabled) as? Bool ?? false

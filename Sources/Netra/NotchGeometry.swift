@@ -11,7 +11,14 @@ enum IslandSurface: CaseIterable, Sendable {
 struct IslandSizes: Equatable, Sendable {
     /// Width of each "wing" beside the notch in the resting state (provider
     /// mark + ring on the left, today's cost on the right).
-    var wingWidth: CGFloat = 92
+    var wingWidth: CGFloat = 0
+    /// Height of the glow strip under the notch at rest.
+    var glowHeight: CGFloat = 4
+    /// Width of each wing beside the notch while peeking.
+    var peekWingWidth: CGFloat = 104
+    /// Width of the resting glow on screens without a notch, where it sits
+    /// at the top edge of the menu bar instead of under the camera.
+    var pillRestWidth: CGFloat = 140
     /// Extra width and height the resting shape grows by on hover.
     var peekGrowth = CGSize(width: 24, height: 6)
     var expanded = CGSize(width: 640, height: 480)
@@ -103,17 +110,16 @@ enum NotchGeometry {
 
     /// The island's size in a mode, before clamping to the screen.
     static func islandSize(_ surface: IslandSurface, layout: NotchLayout, sizes: IslandSizes) -> CGSize {
-        let resting = CGSize(
-            width: layout.notch.width + 2 * sizes.wingWidth,
-            height: layout.notch.height
-        )
+        let resting = layout.hasNotch
+            ? CGSize(width: layout.notch.width + 2 * sizes.wingWidth, height: layout.notch.height + sizes.glowHeight)
+            : CGSize(width: sizes.pillRestWidth, height: sizes.glowHeight)
         switch surface {
         case .resting:
             return resting
         case .peek:
             return CGSize(
-                width: resting.width + sizes.peekGrowth.width,
-                height: resting.height + sizes.peekGrowth.height
+                width: layout.notch.width + 2 * sizes.peekWingWidth,
+                height: layout.notch.height + sizes.peekGrowth.height
             )
         case .expanded:
             return CGSize(

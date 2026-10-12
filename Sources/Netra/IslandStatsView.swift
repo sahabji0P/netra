@@ -575,3 +575,38 @@ struct IslandStatsStrip: View {
         }
     }
 }
+
+/// The 30-day heatmap as one thin row of cells, for the island's footer.
+struct IslandHeatStrip: View {
+    var snapshot: UsageSnapshot
+    var preferences: AppPreferences
+    var now: Date = .now
+    var calendar: Calendar = .current
+
+    var body: some View {
+        let model = IslandStatsModel(
+            snapshot: snapshot, hiddenProviders: preferences.hiddenMenuProviders,
+            now: now, calendar: calendar
+        )
+        HStack(spacing: 2) {
+            ForEach(Array(model.heatmap.enumerated()), id: \.element.id) { index, cell in
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Self.color(cell))
+                    .overlay {
+                        if index == model.heatmap.count - 1 {
+                            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                .strokeBorder(.white.opacity(0.85), lineWidth: 0.75)
+                        }
+                    }
+                    .frame(width: 5, height: 12)
+            }
+        }
+        .help("Last 30 days · \(Format.cost(model.heatmapTotal))")
+        .accessibilityLabel("Last 30 days: \(Format.cost(model.heatmapTotal))")
+    }
+
+    static func color(_ cell: IslandStatsModel.HeatCell) -> Color {
+        guard cell.level > 0, let provider = cell.provider else { return IslandTheme.track }
+        return AgentPalette.color(for: provider).opacity([0.3, 0.5, 0.75, 1][cell.level - 1])
+    }
+}

@@ -433,6 +433,21 @@ struct DashboardSettingsView: View {
                     detail: "A live summary around the camera notch (a pill at the top of screens without one). Hover or click to open limits, accounts, and stats; it grows briefly when a limit runs hot, is reached, or resets.",
                     isOn: $preferences.notchIslandEnabled
                 )
+                Text("Show in the open island")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                ForEach(IslandSection.allCases) { section in
+                    SettingsRow(
+                        section.title,
+                        detail: section.detail,
+                        isOn: Binding(
+                            get: { preferences.showsIslandSection(section) },
+                            set: { preferences.setIslandSection(section, $0) }
+                        )
+                    )
+                    .disabled(!preferences.notchIslandEnabled)
+                }
             }
             DashboardPanel(title: "Celebrations", symbol: "party.popper") {
                 SettingsRow(

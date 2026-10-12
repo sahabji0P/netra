@@ -85,6 +85,7 @@ struct IslandLimitRings: View {
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(IslandTheme.secondaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
                 .frame(width: innerSize - 2 * Self.innerWidth - 6)
             }
@@ -118,33 +119,41 @@ struct IslandLimitRings: View {
 
 // MARK: - Provider card
 
-/// One provider's limits in the expanded island: logo, name, live account,
-/// rings, a row per window, then the next reset and the pace.
+/// One provider in the expanded island: logo, name and live account, the
+/// rings, and the reset countdown. Extra rows follow the user's island
+/// sections. Tapping the account chip lists the saved accounts in place.
 struct IslandProviderCard: View {
     var limits: ProviderLimits
     var preferences: AppPreferences
     var accountLabel: String?
+    var accounts: AccountStore? = nil
     /// The active 5h block's cost, shown under Claude's local estimate.
     var activeBlockCost: Double?
     /// The only card: rings beside the details instead of above them.
     var isWide = false
     var now: Date = .now
 
+    @State private var picksAccount = false
+
+    private var provider: AccountProvider? { AccountProvider(rawValue: limits.agent) }
+    private var canPick: Bool {
+        guard let accounts, let provider else { return false }
+        return accounts.accounts(for: provider).count > 1
+    }
+
     var body: some View {
-        let windows = IslandData.ringOrder(limits.windows)
-        let rings = IslandLimitRings(
-            limits: limits, windows: windows,
-            showRemaining: preferences.barsShowRemaining, now: now
-        )
+        let windows = limits.windows
         VStack(alignment: .leading, spacing: 10) {
             header
-            if isWide {
+            if picksAccount, let accounts, let provider {
+                IslandAccountPicker(accounts: accounts, provider: provider) { picksAccount = false }
+            } else if isWide {
                 HStack(alignment: .top, spacing: 22) {
-                    rings.padding(.leading, 6)
+                    rings(windows).padding(.leading, 6)
                     details(windows)
                 }
             } else {
-                rings
+                rings(windows)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 2)
                 details(windows)
@@ -153,22 +162,31 @@ struct IslandProviderCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background { IslandCardBackground(color: AgentPalette.color(for: limits.agent)) }
+        .animation(IslandTheme.morph, value: picksAccount)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(AgentPalette.displayName(limits.agent)) limits")
     }
 
+    private func rings(_ windows: [QuotaWindow]) -> some View {
+        IslandLimitRings(
+            limits: limits, windows: Array(windows.prefix(2)),
+            showRemaining: preferences.barsShowRemaining, size: 96, now: now
+        )
+    }
+
     private func details(_ windows: [QuotaWindow]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 7) {
-                ForEach(Array(windows.enumerated()), id: \.element) { index, window in
-                    windowRow(window, index: index)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            if let outer = windows.first {
+                resetFooter(outer)
             }
-            if let note = limits.note {
-                Label(note, systemImage: "info.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(IslandTheme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+            if preferences.showsIslandSection(.windowDetails) {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Array(windows.enumerated()), id: \.element) { index, window in
+                        windowRow(window, index: index)
+                    }
+                }
+            } else if preferences.showsIslandSection(.secondWindow), windows.count > 1 {
+                secondLine(windows[1])
             }
             if limits.isEstimate {
                 Text("Local estimate vs your heaviest 5h block\(activeBlockCost.map { " · \(Format.cost($0)) so far" } ?? "")")
@@ -176,50 +194,63 @@ struct IslandProviderCard: View {
                     .foregroundStyle(IslandTheme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 0)
-            if let outer = windows.first {
-                resetFooter(outer)
+            if preferences.showsIslandSection(.bankedResets), let banked = bankedText {
+                Label(banked, systemImage: "arrow.counterclockwise")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.49, green: 0.77, blue: 1))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color(red: 0.49, green: 0.77, blue: 1).opacity(0.12), in: Capsule())
+                    .help(LimitText.bankedResets(limits, now: now) ?? "")
             }
         }
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var bankedText: String? {
+        let count = limits.bankedResetCount
+        guard count > 0 else { return nil }
+        return count == 1 ? "1 banked reset" : "\(count) banked resets"
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                ProviderLogo(agent: limits.agent, size: 16)
-                Text(AgentPalette.displayName(limits.agent))
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            HStack(spacing: 5) {
-                if let badge = limits.isEstimate ? "estimate" : limits.plan.map(Self.planBadge) {
-                    Text(badge)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundStyle(IslandTheme.secondaryText)
-                        .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1.5)
-                        .background(IslandTheme.track, in: Capsule())
-                        .fixedSize()
+        HStack(spacing: 6) {
+            ProviderLogo(agent: limits.agent, size: 16)
+            Text(AgentPalette.shortName(limits.agent))
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .fixedSize()
+            Spacer(minLength: 4)
+            if let label = limits.isEstimate ? accountLabel ?? "estimate" : accountLabel ?? limits.plan.map(Self.planBadge) {
+                Button {
+                    picksAccount.toggle()
+                } label: {
+                    IslandAccountChip(label: label, agent: limits.agent, showsMenu: canPick, isOpen: picksAccount)
                 }
-                if let accountLabel {
-                    IslandAccountChip(label: accountLabel, agent: limits.agent)
-                }
-                Text(freshness)
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(IslandTheme.secondaryText)
-                    .lineLimit(1)
-                    .help(limits.source)
+                .buttonStyle(.plain)
+                .layoutPriority(1)
+                .disabled(!canPick)
+                .help(canPick ? "Switch \(AgentPalette.displayName(limits.agent)) account" : limits.source)
             }
         }
     }
 
-    private var freshness: String {
-        // The source stays in the tooltip; the card is too narrow for both.
-        limits.observedAt.map { Format.age(since: $0, now: now) } ?? limits.source
+    private func secondLine(_ window: QuotaWindow) -> some View {
+        let remaining = preferences.barsShowRemaining && !limits.isEstimate
+        return HStack(spacing: 4) {
+            Text(LimitText.title(window.label))
+                .foregroundStyle(IslandTheme.secondaryText)
+                .lineLimit(1)
+            Text(IslandText.rowAmount(window, showRemaining: remaining, isEstimate: limits.isEstimate))
+                .fontWeight(.semibold)
+                .monospacedDigit()
+                .foregroundStyle(window.usedPercent >= 90 ? IslandTheme.critical : .white.opacity(0.85))
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .font(.system(size: 10.5))
+        .frame(maxWidth: .infinity)
     }
 
     private func windowRow(_ window: QuotaWindow, index: Int) -> some View {
@@ -256,40 +287,84 @@ struct IslandProviderCard: View {
 
     @ViewBuilder
     private func resetFooter(_ outer: QuotaWindow) -> some View {
-        let pace = preferences.showsPace && !limits.isEstimate ? LimitText.pace(outer, now: now) : nil
-        if outer.resetsAt != nil || pace != nil {
-            VStack(alignment: .leading, spacing: 6) {
-                Rectangle().fill(IslandTheme.track).frame(height: 0.5)
-                if let resetsAt = outer.resetsAt {
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Text(IslandText.resetsIn(resetsAt, now: now))
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                        Text(resetCaption(outer))
-                            .font(.system(size: 10))
-                            .foregroundStyle(IslandTheme.secondaryText)
-                            .lineLimit(1)
-                    }
-                }
-                if let pace {
-                    IslandPaceBadge(pace: pace)
+        let pace = preferences.showsIslandSection(.pace) && !limits.isEstimate ? LimitText.pace(outer, now: now) : nil
+        VStack(spacing: 6) {
+            if let resetsAt = outer.resetsAt {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(IslandText.resetsIn(resetsAt, now: now))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(limits.isEstimate ? "until the block ends" : "to reset")
+                        .font(.system(size: 10))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                        .lineLimit(1)
                 }
             }
+            if let pace {
+                IslandPaceBadge(pace: pace)
+            }
         }
-    }
-
-    private func resetCaption(_ outer: QuotaWindow) -> String {
-        if limits.isEstimate { return "until the block ends" }
-        let label = IslandText.ringLabel(outer, isEstimate: false)
-        return label.count <= 6 ? "to \(label) reset" : "to reset"
+        .frame(maxWidth: .infinity)
     }
 
     /// Sources report plans as "team", "pro", "Max 5x"; show them uniformly.
     static func planBadge(_ plan: String) -> String {
         plan.prefix(1).uppercased() + plan.dropFirst()
+    }
+}
+
+/// The saved accounts for one provider, shown in place of a card's rings.
+/// Switching happens only on a click, through the account switcher.
+struct IslandAccountPicker: View {
+    var accounts: AccountStore
+    var provider: AccountProvider
+    var done: () -> Void
+
+    var body: some View {
+        let active = accounts.activeAccount(for: provider)
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(accounts.accounts(for: provider)) { account in
+                let isActive = account.id == active?.id
+                Button {
+                    guard !isActive else { return done() }
+                    Task {
+                        await accounts.switchTo(account)
+                        done()
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(isActive ? AgentPalette.color(for: provider.agent) : IslandTheme.secondaryText)
+                        Text(accounts.roster.label(for: account))
+                            .font(.system(size: 11.5, weight: isActive ? .semibold : .regular))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                    .background(isActive ? Color.white.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(accounts.switching != nil)
+            }
+            if accounts.switching == provider {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Switching…")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                }
+                .padding(.horizontal, 8)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .top)
     }
 }
 
@@ -338,22 +413,26 @@ struct IslandPaceBadge: View {
     }
 }
 
-/// Who is signed in, as a small capsule. Display only: switching lives in
-/// the accounts section.
+/// Who is signed in, as a small capsule; with a chevron when the card can
+/// list other saved accounts to switch to.
 struct IslandAccountChip: View {
     var label: String
     var agent: String
+    var showsMenu = false
+    var isOpen = false
 
     var body: some View {
         HStack(spacing: 3) {
-            Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 9))
-                .foregroundStyle(AgentPalette.color(for: agent))
             Text(label)
                 .font(.system(size: 9.5, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85))
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if showsMenu {
+                Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 2)

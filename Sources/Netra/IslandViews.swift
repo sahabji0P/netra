@@ -22,13 +22,20 @@ enum IslandData {
             .filter { preferences.isProviderVisibleInMenu($0.agent) }
     }
 
-    /// The single window closest to exhaustion across every card. Real
-    /// provider quotas win over Claude's local estimate.
-    static func tightest(_ cards: [ProviderLimits]) -> (limits: ProviderLimits, window: QuotaWindow)? {
-        let candidates = cards.filter { !$0.isEstimate }.isEmpty ? cards : cards.filter { !$0.isEstimate }
-        return candidates
-            .compactMap { limits in limits.mostConstrained.map { (limits, $0) } }
-            .max { $0.1.usedPercent < $1.1.usedPercent }
+    /// The provider's headline window: each adapter lists it first (Claude
+    /// and Codex the 5-hour session, Cursor its included usage), so a side
+    /// pool such as Cursor's API-models lane never stands for the provider.
+    static func primaryWindow(_ limits: ProviderLimits) -> QuotaWindow? {
+        limits.windows.first
+    }
+
+    static let rotationInterval: TimeInterval = 4
+
+    /// The provider the peek shows at `now`, cycling through every card.
+    static func rotating(_ cards: [ProviderLimits], now: Date) -> ProviderLimits? {
+        guard !cards.isEmpty else { return nil }
+        let step = Int((now.timeIntervalSinceReferenceDate / rotationInterval).rounded(.down))
+        return cards[((step % cards.count) + cards.count) % cards.count]
     }
 
     /// Windows shortest first: the ring order (outer = shortest).
@@ -115,10 +122,11 @@ enum IslandText {
     }
 }
 
-// MARK: - Compact (resting)
+// MARK: - Compact (resting and peek)
 
-/// The resting island: the tightest limit's provider and ring on the left of
-/// the notch, today's cost on the right, nothing over the camera itself.
+/// At rest the island is only the notch plus a thin glow under it, one
+/// segment per provider, so nothing beside the notch is covered. While the
+/// pointer is over it, wings grow and rotate through the providers.
 struct IslandCompactView: View {
     var store: UsageStore
     var preferences: AppPreferences
@@ -126,12 +134,18 @@ struct IslandCompactView: View {
     /// Width of the camera housing the content must stay clear of.
     var notchGap: CGFloat = IslandCompactContent.defaultNotchGap
 
+    @Environment(\.islandMetrics) private var metrics
+
     var body: some View {
         IslandCompactContent(
             snapshot: store.snapshot, state: store.state, preferences: preferences,
-            isAwake: awake.isAwake, notchGap: notchGap
+            isAwake: awake.isAwake, notchGap: notchGap,
+            surface: metrics.surface,
+            barHeight: metrics.hasNotch ? metrics.notchHeight : Self.fallbackBarHeight
         )
     }
+
+    static let fallbackBarHeight: CGFloat = 24
 }
 
 struct IslandCompactContent: View {
@@ -140,43 +154,102 @@ struct IslandCompactContent: View {
     var preferences: AppPreferences
     var isAwake: Bool
     var notchGap: CGFloat = defaultNotchGap
+    var surface: IslandSurface = .peek
+    /// Height of the menu-bar band the peek content is centered in.
+    var barHeight: CGFloat = height
 
     static let defaultNotchGap: CGFloat = 190
     static let height: CGFloat = 32
+    static let glowThickness: CGFloat = 3
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
+        TimelineView(.periodic(from: .now, by: 1)) { context in
             let cards = IslandData.limitCards(snapshot, preferences: preferences, now: context.date)
-            HStack(spacing: 0) {
-                leading(IslandData.tightest(cards))
-                Spacer(minLength: notchGap)
-                trailing(now: context.date)
+            if surface == .resting {
+                glow(cards)
+            } else {
+                peek(IslandData.rotating(cards, now: context.date), now: context.date)
             }
-            .padding(.horizontal, 12)
-            .frame(height: Self.height)
         }
         .environment(\.colorScheme, .dark)
     }
 
+    // MARK: Resting glow
+
+    private func glow(_ cards: [ProviderLimits]) -> some View {
+        HStack(spacing: 3) {
+            if cards.isEmpty {
+                Capsule().fill(IslandTheme.track)
+            }
+            ForEach(cards) { limits in
+                glowSegment(limits)
+            }
+        }
+        .frame(height: Self.glowThickness)
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .padding(.bottom, 0.5)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(cards.map(glowDescription).joined(separator: ", "))
+    }
+
+    private func glowSegment(_ limits: ProviderLimits) -> some View {
+        let window = IslandData.primaryWindow(limits)
+        let used = min(max(window?.usedPercent ?? 0, 0), 100) / 100
+        let fill = preferences.barsShowRemaining && !limits.isEstimate ? 1 - used : used
+        let color = IslandRingColor.color(agent: limits.agent, usedPercent: window?.usedPercent ?? 0)
+        return GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(color.opacity(0.22))
+                Capsule().fill(color)
+                    .frame(width: max(proxy.size.width * fill, fill > 0 ? proxy.size.height : 0))
+                    .shadow(color: color.opacity(0.9), radius: 3)
+            }
+        }
+    }
+
+    private func glowDescription(_ limits: ProviderLimits) -> String {
+        guard let window = IslandData.primaryWindow(limits) else { return AgentPalette.displayName(limits.agent) }
+        return "\(AgentPalette.displayName(limits.agent)) \(IslandText.percent(window.usedPercent)) used"
+    }
+
+    // MARK: Peek
+
+    private func peek(_ limits: ProviderLimits?, now: Date) -> some View {
+        HStack(spacing: 0) {
+            leading(limits)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Color.clear.frame(width: notchGap)
+            trailing(limits, now: now)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: barHeight)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .id(limits?.agent ?? "none")
+        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+        .animation(IslandTheme.morph, value: limits?.agent)
+    }
+
     @ViewBuilder
-    private func leading(_ tightest: (limits: ProviderLimits, window: QuotaWindow)?) -> some View {
+    private func leading(_ limits: ProviderLimits?) -> some View {
         HStack(spacing: 6) {
-            if let tightest {
-                ProviderLogo(agent: tightest.limits.agent, size: 14)
+            if let limits, let window = IslandData.primaryWindow(limits) {
+                ProviderLogo(agent: limits.agent, size: 14)
                 IslandRing(
-                    fraction: min(max(tightest.window.usedPercent, 0), 100) / 100,
-                    color: IslandRingColor.color(agent: tightest.limits.agent, usedPercent: tightest.window.usedPercent),
+                    fraction: min(max(window.usedPercent, 0), 100) / 100,
+                    color: IslandRingColor.color(agent: limits.agent, usedPercent: window.usedPercent),
                     lineWidth: 2.5
                 )
                 .frame(width: 15, height: 15)
-                Text(tightest.limits.isEstimate
-                     ? Format.peakPercent(tightest.window.usedPercent)
-                     : IslandText.percent(tightest.window.usedPercent))
+                Text(limits.isEstimate
+                     ? Format.peakPercent(window.usedPercent)
+                     : IslandText.rowAmount(window, showRemaining: preferences.barsShowRemaining, isEstimate: false))
                     .font(.system(size: 11.5, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
                     .fixedSize()
-                    .foregroundStyle(tightest.window.usedPercent >= 90 ? IslandTheme.critical : .white)
+                    .foregroundStyle(window.usedPercent >= 90 ? IslandTheme.critical : .white)
             } else {
                 Image(systemName: "gauge.with.dots.needle.33percent")
                     .font(.system(size: 12, weight: .semibold))
@@ -184,13 +257,15 @@ struct IslandCompactContent: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(tightest.map {
-            "\(AgentPalette.displayName($0.limits.agent)) \(LimitText.title($0.window.label)): \(IslandText.percent($0.window.usedPercent)) used"
+        .accessibilityLabel(limits.flatMap { limits in
+            IslandData.primaryWindow(limits).map {
+                "\(AgentPalette.displayName(limits.agent)) \(LimitText.title($0.label)): \(IslandText.percent($0.usedPercent)) used"
+            }
         } ?? "No limits")
     }
 
-    private func trailing(now: Date) -> some View {
-        let today = IslandData.today(snapshot, preferences: preferences, now: now)
+    private func trailing(_ limits: ProviderLimits?, now: Date) -> some View {
+        let resetsAt = limits.flatMap(IslandData.primaryWindow)?.resetsAt
         let isWarning = IslandData.status(state, fetchedAt: snapshot?.fetchedAt, now: now).isWarning
         return HStack(spacing: 5) {
             if isAwake {
@@ -199,14 +274,18 @@ struct IslandCompactContent: View {
                     .foregroundStyle(IslandTheme.secondaryText)
                     .accessibilityLabel("Keeping awake")
             }
-            Text(today.map { Format.cost($0.cost) } ?? "—")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .fixedSize()
-                .foregroundStyle(today == nil ? IslandTheme.secondaryText : isWarning ? IslandTheme.warning : .white)
-                .contentTransition(.numericText())
-                .accessibilityLabel("Today \(today.map { Format.cost($0.cost) } ?? "no data")")
+            if let resetsAt {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(IslandTheme.secondaryText)
+                Text(IslandText.resetsIn(resetsAt, now: now))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize()
+                    .foregroundStyle(isWarning ? IslandTheme.warning : .white)
+                    .accessibilityLabel("Resets in \(IslandText.resetsIn(resetsAt, now: now))")
+            }
         }
     }
 }
@@ -350,8 +429,8 @@ struct IslandActivityView: View {
 
 // MARK: - Expanded
 
-/// The island fully open: today's spend, a card per provider, banked
-/// resets, every saved account, usage stats, and keep awake.
+/// The island fully open: a card per provider, then whichever optional
+/// sections the user turned on in Settings, and a one-line footer.
 struct IslandExpandedView: View {
     var store: UsageStore
     var preferences: AppPreferences
@@ -390,13 +469,12 @@ struct IslandExpandedContent: View {
     var claudeKeychainNeedsApproval = false
     var openDashboard: (DashboardSection) -> Void = { _ in }
 
-    static let width: CGFloat = 620
+    static let width: CGFloat = 580
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let cards = IslandData.limitCards(snapshot, preferences: preferences, now: context.date)
-            VStack(alignment: .leading, spacing: 14) {
-                header(now: context.date)
+            VStack(alignment: .leading, spacing: 12) {
                 if let accounts, let notice = accounts.notice {
                     AccountNoticeBanner(notice: notice) { accounts.dismissNotice() }
                 }
@@ -404,20 +482,17 @@ struct IslandExpandedContent: View {
                     emptyState
                 } else {
                     limitsSection(cards, now: context.date)
-                    IslandBankedResets(cards: cards, now: context.date)
                 }
-                if let accounts {
+                if let accounts, preferences.showsIslandSection(.accounts) {
                     IslandAccountsSection(
                         accounts: accounts, preferences: preferences,
                         openDashboard: { openDashboard(.accounts) }
                     )
                 }
-                if let snapshot {
-                    IslandStatsStrip(snapshot: snapshot, preferences: preferences, showsTodayTotals: false)
+                if let snapshot, preferences.showsIslandSection(.detailedStats) {
+                    IslandStatsStrip(snapshot: snapshot, preferences: preferences)
                 }
-                if preferences.showsKeepAwake {
-                    IslandKeepAwakeRow(awake: awake)
-                }
+                footer(now: context.date)
             }
             .padding(.horizontal, 18)
             .padding(.top, 12)
@@ -427,39 +502,47 @@ struct IslandExpandedContent: View {
         .environment(\.colorScheme, .dark)
     }
 
-    private func header(now: Date) -> some View {
+    /// Today's spend with a 30-day strip, any refresh warning, and small
+    /// buttons for keep awake and the dashboard.
+    private func footer(now: Date) -> some View {
         let today = IslandData.today(snapshot, preferences: preferences, now: now)
         let status = IslandData.status(state, fetchedAt: snapshot?.fetchedAt, now: now)
-        return HStack(alignment: .lastTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Today")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(IslandTheme.secondaryText)
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(today.map { Format.cost($0.cost) } ?? "No usage yet")
-                        .font(.system(size: today == nil ? 15 : 28, weight: .semibold, design: .rounded))
+        return HStack(spacing: 10) {
+            if preferences.showsIslandSection(.usageFooter) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(today.map { Format.cost($0.cost) } ?? "$0")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
                         .monospacedDigit()
-                        .foregroundStyle(today == nil ? IslandTheme.secondaryText : .white)
+                        .foregroundStyle(.white)
                         .contentTransition(.numericText())
-                    if let today, today.totalTokens > 0 {
-                        Text("\(Format.tokens(today.totalTokens)) tokens · API-equivalent")
-                            .font(.system(size: 11))
-                            .monospacedDigit()
-                            .foregroundStyle(IslandTheme.secondaryText)
-                    }
+                    Text("today")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                }
+                .help("Estimated at API list prices — what this usage would cost pay-as-you-go, not your subscription bill.")
+                if let snapshot {
+                    IslandHeatStrip(snapshot: snapshot, preferences: preferences, now: now)
                 }
             }
-            Spacer(minLength: 8)
-            if state == .refreshing {
-                ProgressView().controlSize(.mini)
+            Spacer(minLength: 6)
+            if status.isWarning || state == .refreshing {
+                Text(status.text)
+                    .font(.system(size: 10))
+                    .foregroundStyle(status.isWarning ? IslandTheme.warning : IslandTheme.secondaryText)
+                    .lineLimit(1)
             }
-            Text(status.text)
-                .font(.system(size: 11))
-                .foregroundStyle(status.isWarning ? IslandTheme.warning : IslandTheme.secondaryText)
-                .lineLimit(1)
+            if preferences.showsIslandSection(.keepAwake) {
+                IslandRoundButton(
+                    symbol: awake.isAwake ? "cup.and.saucer.fill" : "cup.and.saucer",
+                    isOn: awake.isAwake,
+                    help: awake.isAwake ? "Keeping your Mac awake. Click to allow sleep." : "Keep your Mac awake"
+                ) { awake.setAwake(!awake.isAwake) }
+            }
+            IslandRoundButton(symbol: "arrow.up.right", isOn: false, help: "Open the Netra dashboard") {
+                openDashboard(.usage)
+            }
         }
-        .help("Estimated at API list prices — what this usage would cost pay-as-you-go, not your subscription bill.")
-        .accessibilityElement(children: .combine)
+        .padding(.horizontal, 2)
     }
 
     @ViewBuilder
@@ -473,6 +556,7 @@ struct IslandExpandedContent: View {
                     IslandProviderCard(
                         limits: limits, preferences: preferences,
                         accountLabel: accountLabel(for: limits.agent),
+                        accounts: accounts,
                         activeBlockCost: limits.isEstimate ? snapshot?.activeBlock?.cost : nil,
                         isWide: cards.count == 1 && missing == nil,
                         now: now
@@ -519,6 +603,28 @@ struct IslandExpandedContent: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
         .background(IslandTheme.card, in: RoundedRectangle(cornerRadius: IslandTheme.cardRadius, style: .continuous))
+    }
+}
+
+/// A small circular icon button for the footer.
+struct IslandRoundButton: View {
+    var symbol: String
+    var isOn: Bool
+    var help: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isOn ? .black : .white.opacity(0.85))
+                .frame(width: 26, height: 26)
+                .background(isOn ? Color.white : IslandTheme.track, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 

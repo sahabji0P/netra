@@ -129,17 +129,25 @@ more than 25% below or 2.5× above it under the `pricing` log category.
 ## Notch island
 
 On a MacBook with a camera notch, Netra also lives around the notch. At rest it
-shows the provider closest to its limit (logo, ring, percent) on the left and
-today's spend on the right. Hover or click to open one panel with every
-provider's limits (rings with an elapsed-time tick, reset countdowns, pace),
-banked resets, all saved accounts with one-click switching, and usage stats
-(change vs your 7-day average, a 30-day heatmap, model and token mix, and the
-current 5-hour block). It grows for a few seconds when a limit runs hot (your
-provider-limit alert threshold, 80% by default), is reached (with a live
-countdown to the reset), or resets, and when you switch accounts or toggle
-Keep Awake. Screens without a notch get the same island as a pill at the top
-center. The menu-bar icon stays either way; turn the island off in
-Settings → Notch island. Claude Code, Cursor, GitHub Copilot, and OpenCode show their official marks; Codex shows the OpenAI mark (OpenAI publishes no separate Codex vector mark), and other providers show their color dot.
+is only a thin glow under the notch, one segment per provider filled by how
+much is left, so nothing in the menu bar is covered. Hover the notch to peek:
+it rotates through Claude Code, Codex, and Cursor every few seconds, showing
+each provider's main limit and its reset countdown. Keep hovering or click to
+open a card per provider (rings with an elapsed-time tick, the reset countdown,
+and the live account; tap the account to switch to another saved one), plus
+today's spend with a 30-day strip and buttons for Keep Awake and the
+dashboard. Choose what else the open island shows (banked resets, the second
+limit, every limit window, pace, all saved accounts, detailed stats) in
+Settings → Notch island.
+
+It grows for a few seconds when a limit runs hot (your provider-limit alert
+threshold, 80% by default), is reached (with a live countdown to the reset),
+or resets, and when you switch accounts or toggle Keep Awake. Screens without
+a notch get the glow at the top center of the menu bar. The menu-bar icon
+stays either way, and the island can be turned off in Settings. Claude Code,
+Cursor, GitHub Copilot, and OpenCode show their official marks; Codex shows
+the OpenAI mark (OpenAI publishes no separate Codex vector mark), and other
+providers show their color dot.
 
 ## Multiple Claude Code and Codex accounts
 

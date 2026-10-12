@@ -88,6 +88,7 @@ final class IslandCoordinator {
             IslandActivityView(activity: activity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
+        controller.sizes.expanded.width = IslandExpandedContent.width
         return controller
     }
 

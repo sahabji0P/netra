@@ -216,20 +216,45 @@ final class IslandDataTests: XCTestCase {
         XCTAssertEqual(IslandData.ringOrder(windows).map(\.label), ["5h", "weekly", "monthly"])
     }
 
-    func testTightestPrefersRealQuotasOverEstimates() {
-        let estimate = ProviderLimits(
-            agent: "claude", source: "Local estimate", observedAt: nil,
-            windows: [QuotaWindow(label: "5h block vs your peak", usedPercent: 180)], isEstimate: true
+    func testPeekRotatesThroughEveryProviderUsingItsHeadlineWindow() {
+        let cursor = ProviderLimits(
+            agent: "cursor", source: "Reported by Cursor", observedAt: nil,
+            windows: [
+                QuotaWindow(label: "included usage", usedPercent: 34),
+                QuotaWindow(label: "API models", usedPercent: 100),
+            ]
         )
-        let codex = ProviderLimits(
-            agent: "codex", source: "Reported by OpenAI", observedAt: nil,
-            windows: [QuotaWindow(label: "5h", usedPercent: 30), QuotaWindow(label: "weekly", usedPercent: 64)]
+        let claude = ProviderLimits(
+            agent: "claude", source: "Via Claude Code", observedAt: nil,
+            windows: [QuotaWindow(label: "5h", usedPercent: 13), QuotaWindow(label: "weekly", usedPercent: 2)]
         )
-        let tightest = IslandData.tightest([estimate, codex])
-        XCTAssertEqual(tightest?.limits.agent, "codex")
-        XCTAssertEqual(tightest?.window.label, "weekly")
-        XCTAssertEqual(IslandData.tightest([estimate])?.limits.agent, "claude")
-        XCTAssertNil(IslandData.tightest([]))
+        // A side pool at 100% must not stand for the provider.
+        XCTAssertEqual(IslandData.primaryWindow(cursor)?.label, "included usage")
+
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        let shown = (0..<4).map { step in
+            IslandData.rotating([claude, cursor], now: start.addingTimeInterval(Double(step) * IslandData.rotationInterval))?.agent
+        }
+        XCTAssertEqual(shown, ["claude", "cursor", "claude", "cursor"])
+        XCTAssertEqual(
+            IslandData.rotating([claude, cursor], now: start.addingTimeInterval(IslandData.rotationInterval - 0.5))?.agent,
+            "claude"
+        )
+        XCTAssertNil(IslandData.rotating([], now: start))
+    }
+
+    func testIslandSectionsDefaultToTheTrimmedSetAndPersist() {
+        let suite = "NetraTests.IslandSections.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = AppPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.islandSections, IslandSection.defaults)
+        XCTAssertFalse(preferences.showsIslandSection(.accounts))
+        preferences.setIslandSection(.accounts, true)
+        preferences.setIslandSection(.usageFooter, false)
+        let reloaded = AppPreferences(defaults: defaults)
+        XCTAssertTrue(reloaded.showsIslandSection(.accounts))
+        XCTAssertFalse(reloaded.showsIslandSection(.usageFooter))
     }
 
     func testLimitCardsRespectVisibilityAndTodayHidesHiddenProviders() {
