@@ -38,6 +38,12 @@ enum IslandData {
         return cards[((step % cards.count) + cards.count) % cards.count]
     }
 
+    /// Whether the peek's right wing shows today's spend (second half of each
+    /// provider's turn) rather than the reset countdown (first half).
+    static func peekShowsSpend(now: Date) -> Bool {
+        now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: rotationInterval) >= rotationInterval / 2
+    }
+
     /// Windows shortest first: the ring order (outer = shortest).
     static func ringOrder(_ windows: [QuotaWindow]) -> [QuotaWindow] {
         windows.enumerated().sorted { lhs, rhs in
@@ -264,8 +270,12 @@ struct IslandCompactContent: View {
         } ?? "No limits")
     }
 
+    /// The right wing takes turns: this provider's reset countdown, then
+    /// today's total spend, each for half of the provider's turn.
     private func trailing(_ limits: ProviderLimits?, now: Date) -> some View {
         let resetsAt = limits.flatMap(IslandData.primaryWindow)?.resetsAt
+        let today = IslandData.today(snapshot, preferences: preferences, now: now)
+        let showsSpend = IslandData.peekShowsSpend(now: now) || resetsAt == nil
         let isWarning = IslandData.status(state, fetchedAt: snapshot?.fetchedAt, now: now).isWarning
         return HStack(spacing: 5) {
             if isAwake {
@@ -274,19 +284,36 @@ struct IslandCompactContent: View {
                     .foregroundStyle(IslandTheme.secondaryText)
                     .accessibilityLabel("Keeping awake")
             }
-            if let resetsAt {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(IslandTheme.secondaryText)
-                Text(IslandText.resetsIn(resetsAt, now: now))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize()
-                    .foregroundStyle(isWarning ? IslandTheme.warning : .white)
+            Group {
+                if showsSpend {
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(today.map { Format.cost($0.cost) } ?? "$0")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(isWarning ? IslandTheme.warning : .white)
+                        Text("today")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(IslandTheme.secondaryText)
+                    }
+                    .accessibilityLabel("Today \(today.map { Format.cost($0.cost) } ?? "no spend")")
+                } else if let resetsAt {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(IslandTheme.secondaryText)
+                        Text(IslandText.resetsIn(resetsAt, now: now))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
                     .accessibilityLabel("Resets in \(IslandText.resetsIn(resetsAt, now: now))")
+                }
             }
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+            .id(showsSpend)
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
+        .animation(IslandTheme.morph, value: showsSpend)
     }
 }
 
@@ -557,6 +584,8 @@ struct IslandExpandedContent: View {
                         limits: limits, preferences: preferences,
                         accountLabel: accountLabel(for: limits.agent),
                         accounts: accounts,
+                        todayCost: IslandData.today(snapshot, preferences: preferences, now: now)?
+                            .agentStat(limits.agent)?.cost ?? 0,
                         activeBlockCost: limits.isEstimate ? snapshot?.activeBlock?.cost : nil,
                         isWide: cards.count == 1 && missing == nil,
                         now: now

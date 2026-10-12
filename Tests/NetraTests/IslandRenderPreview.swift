@@ -243,12 +243,24 @@ final class IslandDataTests: XCTestCase {
         XCTAssertNil(IslandData.rotating([], now: start))
     }
 
+    func testPeekShowsCountdownThenSpendWithinEachTurn() {
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        let half = IslandData.rotationInterval / 2
+        XCTAssertFalse(IslandData.peekShowsSpend(now: start))
+        XCTAssertFalse(IslandData.peekShowsSpend(now: start.addingTimeInterval(half - 0.1)))
+        XCTAssertTrue(IslandData.peekShowsSpend(now: start.addingTimeInterval(half)))
+        XCTAssertFalse(IslandData.peekShowsSpend(now: start.addingTimeInterval(IslandData.rotationInterval)))
+    }
+
     func testIslandSectionsDefaultToTheTrimmedSetAndPersist() {
         let suite = "NetraTests.IslandSections.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = AppPreferences(defaults: defaults)
         XCTAssertEqual(preferences.islandSections, IslandSection.defaults)
+        XCTAssertTrue(preferences.showsIslandSection(.providerSpend))
+        XCTAssertTrue(preferences.showsIslandSection(.bankedResets))
+        XCTAssertTrue(preferences.showsIslandSection(.secondWindow))
         XCTAssertFalse(preferences.showsIslandSection(.accounts))
         preferences.setIslandSection(.accounts, true)
         preferences.setIslandSection(.usageFooter, false)

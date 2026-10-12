@@ -127,6 +127,8 @@ struct IslandProviderCard: View {
     var preferences: AppPreferences
     var accountLabel: String?
     var accounts: AccountStore? = nil
+    /// This provider's estimated spend today.
+    var todayCost: Double = 0
     /// The active 5h block's cost, shown under Claude's local estimate.
     var activeBlockCost: Double?
     /// The only card: rings beside the details instead of above them.
@@ -134,6 +136,7 @@ struct IslandProviderCard: View {
     var now: Date = .now
 
     @State private var picksAccount = false
+    @State private var showsCredits = false
 
     private var provider: AccountProvider? { AccountProvider(rawValue: limits.agent) }
     private var canPick: Bool {
@@ -194,17 +197,94 @@ struct IslandProviderCard: View {
                     .foregroundStyle(IslandTheme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if preferences.showsIslandSection(.providerSpend) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(Format.cost(todayCost))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                    Text("today")
+                        .font(.system(size: 10))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(maxWidth: .infinity)
+                .help("Estimated at API list prices — what this usage would cost pay-as-you-go, not your subscription bill.")
+            }
             if preferences.showsIslandSection(.bankedResets), let banked = bankedText {
-                Label(banked, systemImage: "arrow.counterclockwise")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.49, green: 0.77, blue: 1))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Color(red: 0.49, green: 0.77, blue: 1).opacity(0.12), in: Capsule())
-                    .help(LimitText.bankedResets(limits, now: now) ?? "")
+                bankedResets(banked)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private static let creditBlue = Color(red: 0.49, green: 0.77, blue: 1)
+
+    /// The banked-reset count and the next expiry; tapping lists every
+    /// credit with its own expiry. Display only: redeeming happens in Codex.
+    private func bankedResets(_ banked: String) -> some View {
+        let credits = limits.resetCredits.filter { $0.isAvailable(at: now) }
+        return VStack(spacing: 5) {
+            Button {
+                showsCredits.toggle()
+            } label: {
+                VStack(spacing: 2) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text(banked)
+                        if !credits.isEmpty {
+                            Image(systemName: showsCredits ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 7, weight: .bold))
+                        }
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Self.creditBlue)
+                    Text(nextExpiry(credits))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity)
+                .background(Self.creditBlue.opacity(0.1), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(credits.isEmpty)
+            .help("Redeem banked resets in \(AgentPalette.displayName(limits.agent))")
+            if showsCredits {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(credits.enumerated()), id: \.offset) { _, credit in
+                        HStack(spacing: 4) {
+                            Text(credit.title ?? "Reset")
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 4)
+                            Text(credit.expiresAt.map { "expires \(IslandText.resetsIn($0, now: now))" } ?? "no expiry")
+                                .foregroundStyle(IslandTheme.secondaryText)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                        .font(.system(size: 9.5))
+                    }
+                }
+                .padding(.horizontal, 4)
+                .transition(.opacity)
+            }
+        }
+        .animation(IslandTheme.morph, value: showsCredits)
+    }
+
+    private func nextExpiry(_ credits: [LimitResetCredit]) -> String {
+        guard let soonest = credits.compactMap(\.expiresAt).min() else {
+            return credits.isEmpty ? "Redeem in \(AgentPalette.shortName(limits.agent))" : "No expiry"
+        }
+        return "Next expires in \(IslandText.resetsIn(soonest, now: now))"
     }
 
     private var bankedText: String? {
@@ -248,6 +328,14 @@ struct IslandProviderCard: View {
                 .foregroundStyle(window.usedPercent >= 90 ? IslandTheme.critical : .white.opacity(0.85))
                 .lineLimit(1)
                 .fixedSize()
+            if let resetsAt = window.resetsAt {
+                Text("· \(IslandText.resetsIn(resetsAt, now: now))")
+                    .monospacedDigit()
+                    .foregroundStyle(IslandTheme.secondaryText)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .help(LimitText.reset(resetsAt, style: preferences.resetTimeStyle, now: now))
+            }
         }
         .font(.system(size: 10.5))
         .frame(maxWidth: .infinity)

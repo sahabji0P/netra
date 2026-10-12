@@ -132,12 +132,14 @@ On a MacBook with a camera notch, Netra also lives around the notch. At rest it
 is only a thin glow under the notch, one segment per provider filled by how
 much is left, so nothing in the menu bar is covered. Hover the notch to peek:
 it rotates through Claude Code, Codex, and Cursor every few seconds, showing
-each provider's main limit and its reset countdown. Keep hovering or click to
-open a card per provider (rings with an elapsed-time tick, the reset countdown,
-and the live account; tap the account to switch to another saved one), plus
-today's spend with a 30-day strip and buttons for Keep Awake and the
-dashboard. Choose what else the open island shows (banked resets, the second
-limit, every limit window, pace, all saved accounts, detailed stats) in
+each provider's main limit, with its reset countdown and today's spend taking
+turns beside it. Keep hovering or click to open a card per provider: rings
+with an elapsed-time tick, the reset countdown, the weekly limit and its
+reset, the provider's spend today, banked resets with the next expiry (tap
+for every credit), and the live account (tap it to switch to another saved
+one). Below the cards sit today's total with a 30-day strip and buttons for
+Keep Awake and the dashboard. Choose what the open island shows (including
+every limit window, pace, all saved accounts, and detailed stats) in
 Settings → Notch island.
 
 It grows for a few seconds when a limit runs hot (your provider-limit alert

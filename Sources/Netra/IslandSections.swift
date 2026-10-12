@@ -5,6 +5,7 @@ import Foundation
 /// user's choice in Settings.
 enum IslandSection: String, CaseIterable, Identifiable, Sendable {
     case usageFooter
+    case providerSpend
     case keepAwake
     case bankedResets
     case secondWindow
@@ -18,6 +19,7 @@ enum IslandSection: String, CaseIterable, Identifiable, Sendable {
     var title: String {
         switch self {
         case .usageFooter: "Today's spend and 30-day strip"
+        case .providerSpend: "Each provider's spend today"
         case .keepAwake: "Keep awake button"
         case .bankedResets: "Banked resets badge"
         case .secondWindow: "Second limit under each ring"
@@ -31,9 +33,10 @@ enum IslandSection: String, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .usageFooter: "One line at the bottom: today's cost and a heatmap of the last 30 days."
+        case .providerSpend: "The dollar estimate for that provider on its card."
         case .keepAwake: "A button to keep the Mac awake from the island."
-        case .bankedResets: "How many banked resets a provider has, on its card."
-        case .secondWindow: "For example \"Weekly 98% left\" below the session ring."
+        case .bankedResets: "How many banked resets a provider has and when the next one expires. Tap it for the full list."
+        case .secondWindow: "For example \"Weekly 98% left · resets in 6d 11h\" below the session ring."
         case .windowDetails: "A row per limit window with its own reset time."
         case .pace: "Whether you are using a window faster than time passes."
         case .accounts: "A list of every saved account with last-known limits. The account chip on each card can switch either way."
@@ -41,5 +44,5 @@ enum IslandSection: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    static let defaults: Set<IslandSection> = [.usageFooter, .keepAwake, .bankedResets, .secondWindow]
+    static let defaults: Set<IslandSection> = [.usageFooter, .providerSpend, .keepAwake, .bankedResets, .secondWindow]
 }
