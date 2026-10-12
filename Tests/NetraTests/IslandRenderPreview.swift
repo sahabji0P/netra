@@ -230,6 +230,12 @@ final class IslandDataTests: XCTestCase {
         )
         // A side pool at 100% must not stand for the provider.
         XCTAssertEqual(IslandData.primaryWindow(cursor)?.label, "included usage")
+        // Without a weekly window the next one is the second line.
+        XCTAssertEqual(IslandData.secondaryWindow(cursor)?.label, "API models")
+        var withGrok = cursor
+        withGrok.windows.append(QuotaWindow(label: "Grok Bot", usedPercent: 9, durationSeconds: 7 * 24 * 3600))
+        XCTAssertEqual(IslandData.secondaryWindow(withGrok)?.label, "Grok Bot")
+        XCTAssertEqual(IslandData.secondaryWindow(claude)?.label, "weekly")
 
         let start = Date(timeIntervalSinceReferenceDate: 0)
         let shown = (0..<4).map { step in

@@ -172,7 +172,7 @@ struct IslandProviderCard: View {
 
     private func rings(_ windows: [QuotaWindow]) -> some View {
         IslandLimitRings(
-            limits: limits, windows: Array(windows.prefix(2)),
+            limits: limits, windows: [windows.first, IslandData.secondaryWindow(limits)].compactMap { $0 },
             showRemaining: preferences.barsShowRemaining, size: 96, now: now
         )
     }
@@ -188,8 +188,8 @@ struct IslandProviderCard: View {
                         windowRow(window, index: index)
                     }
                 }
-            } else if preferences.showsIslandSection(.secondWindow), windows.count > 1 {
-                secondLine(windows[1])
+            } else if preferences.showsIslandSection(.secondWindow), let second = IslandData.secondaryWindow(limits) {
+                secondLine(second)
             }
             if limits.isEstimate {
                 Text("Local estimate vs your heaviest 5h block\(activeBlockCost.map { " · \(Format.cost($0)) so far" } ?? "")")
@@ -294,10 +294,10 @@ struct IslandProviderCard: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            ProviderLogo(agent: limits.agent, size: 16)
+        HStack(spacing: 5) {
+            ProviderLogo(agent: limits.agent, size: 15)
             Text(AgentPalette.shortName(limits.agent))
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .fixedSize()
@@ -515,6 +515,7 @@ struct IslandAccountChip: View {
                 .font(.system(size: 9.5, weight: .medium))
                 .foregroundStyle(.white.opacity(0.85))
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .truncationMode(.middle)
             if showsMenu {
                 Image(systemName: isOpen ? "chevron.up" : "chevron.down")

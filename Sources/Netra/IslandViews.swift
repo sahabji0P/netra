@@ -29,6 +29,18 @@ enum IslandData {
         limits.windows.first
     }
 
+    /// The window shown beside the headline one (inner ring and the second
+    /// line): the weekly limit when the provider has one, so Cursor shows its
+    /// weekly Grok window rather than a sub-pool of the monthly allowance.
+    static func secondaryWindow(_ limits: ProviderLimits) -> QuotaWindow? {
+        let others = Array(limits.windows.dropFirst())
+        let week: Double = 7 * 24 * 3600
+        return others.first { window in
+            window.label.lowercased().hasPrefix("weekly")
+                || window.durationSeconds.map { abs($0 - week) < 24 * 3600 } == true
+        } ?? others.first
+    }
+
     static let rotationInterval: TimeInterval = 4
 
     /// The provider the peek shows at `now`, cycling through every card.
