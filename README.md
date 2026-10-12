@@ -128,13 +128,13 @@ more than 25% below or 2.5× above it under the `pricing` log category.
 
 ## Notch island
 
-On a MacBook with a camera notch, Netra also lives around the notch. At rest it
-is only a thin glow under the notch, one segment per provider filled by how
-much is left, so nothing in the menu bar is covered. Hover the notch to peek:
-it rotates through Claude Code, Codex, and Cursor every few seconds, showing
-each provider's main limit, with its reset countdown and today's spend taking
-turns beside it. Keep hovering or click to open a card per provider: rings
-with an elapsed-time tick, the reset countdown, the weekly limit and its
+On a MacBook with a camera notch, Netra also lives around the notch. It is
+always visible as two narrow wings beside the notch that rotate through Claude
+Code, Codex, and Cursor every few seconds: the provider's logo and how much of
+its main limit is left on the left, today's total spend over that limit's
+reset countdown on the right. The wings are sized to stay clear of the
+menu-bar icons next to the notch on a typical MacBook. Hover to open a card
+per provider: rings with an elapsed-time tick, the reset countdown, the weekly limit and its
 reset, the provider's spend today, banked resets with the next expiry (tap
 for every credit), and the live account (tap it to switch to another saved
 one). Below the cards sit today's total with a 30-day strip and buttons for
@@ -145,7 +145,7 @@ Settings → Notch island.
 It grows for a few seconds when a limit runs hot (your provider-limit alert
 threshold, 80% by default), is reached (with a live countdown to the reset),
 or resets, and when you switch accounts or toggle Keep Awake. Screens without
-a notch get the glow at the top center of the menu bar. The menu-bar icon
+a notch get the same wings as a pill at the top center. The menu-bar icon
 stays either way, and the island can be turned off in Settings. Claude Code,
 Cursor, GitHub Copilot, and OpenCode show their official marks; Codex shows
 the OpenAI mark (OpenAI publishes no separate Codex vector mark), and other

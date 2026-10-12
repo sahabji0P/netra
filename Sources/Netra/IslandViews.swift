@@ -50,12 +50,6 @@ enum IslandData {
         return cards[((step % cards.count) + cards.count) % cards.count]
     }
 
-    /// Whether the peek's right wing shows today's spend (second half of each
-    /// provider's turn) rather than the reset countdown (first half).
-    static func peekShowsSpend(now: Date) -> Bool {
-        now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: rotationInterval) >= rotationInterval / 2
-    }
-
     /// Windows shortest first: the ring order (outer = shortest).
     static func ringOrder(_ windows: [QuotaWindow]) -> [QuotaWindow] {
         windows.enumerated().sorted { lhs, rhs in
@@ -142,9 +136,9 @@ enum IslandText {
 
 // MARK: - Compact (resting and peek)
 
-/// At rest the island is only the notch plus a thin glow under it, one
-/// segment per provider, so nothing beside the notch is covered. While the
-/// pointer is over it, wings grow and rotate through the providers.
+/// The always-visible island: wings beside the notch that rotate through the
+/// providers. Left: the provider's logo and how much of its main limit is
+/// left. Right: today's total spend over that limit's reset countdown.
 struct IslandCompactView: View {
     var store: UsageStore
     var preferences: AppPreferences
@@ -158,7 +152,6 @@ struct IslandCompactView: View {
         IslandCompactContent(
             snapshot: store.snapshot, state: store.state, preferences: preferences,
             isAwake: awake.isAwake, notchGap: notchGap,
-            surface: metrics.surface,
             barHeight: metrics.hasNotch ? metrics.notchHeight : Self.fallbackBarHeight
         )
     }
@@ -172,68 +165,21 @@ struct IslandCompactContent: View {
     var preferences: AppPreferences
     var isAwake: Bool
     var notchGap: CGFloat = defaultNotchGap
-    var surface: IslandSurface = .peek
     /// Height of the menu-bar band the peek content is centered in.
     var barHeight: CGFloat = height
 
     static let defaultNotchGap: CGFloat = 190
     static let height: CGFloat = 32
-    static let glowThickness: CGFloat = 3
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let cards = IslandData.limitCards(snapshot, preferences: preferences, now: context.date)
-            if surface == .resting {
-                glow(cards)
-            } else {
-                peek(IslandData.rotating(cards, now: context.date), now: context.date)
-            }
+            wings(IslandData.rotating(cards, now: context.date), now: context.date)
         }
         .environment(\.colorScheme, .dark)
     }
 
-    // MARK: Resting glow
-
-    private func glow(_ cards: [ProviderLimits]) -> some View {
-        HStack(spacing: 3) {
-            if cards.isEmpty {
-                Capsule().fill(IslandTheme.track)
-            }
-            ForEach(cards) { limits in
-                glowSegment(limits)
-            }
-        }
-        .frame(height: Self.glowThickness)
-        .padding(.horizontal, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .padding(.bottom, 0.5)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(cards.map(glowDescription).joined(separator: ", "))
-    }
-
-    private func glowSegment(_ limits: ProviderLimits) -> some View {
-        let window = IslandData.primaryWindow(limits)
-        let used = min(max(window?.usedPercent ?? 0, 0), 100) / 100
-        let fill = preferences.barsShowRemaining && !limits.isEstimate ? 1 - used : used
-        let color = IslandRingColor.color(agent: limits.agent, usedPercent: window?.usedPercent ?? 0)
-        return GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(color.opacity(0.22))
-                Capsule().fill(color)
-                    .frame(width: max(proxy.size.width * fill, fill > 0 ? proxy.size.height : 0))
-                    .shadow(color: color.opacity(0.9), radius: 3)
-            }
-        }
-    }
-
-    private func glowDescription(_ limits: ProviderLimits) -> String {
-        guard let window = IslandData.primaryWindow(limits) else { return AgentPalette.displayName(limits.agent) }
-        return "\(AgentPalette.displayName(limits.agent)) \(IslandText.percent(window.usedPercent)) used"
-    }
-
-    // MARK: Peek
-
-    private func peek(_ limits: ProviderLimits?, now: Date) -> some View {
+    private func wings(_ limits: ProviderLimits?, now: Date) -> some View {
         HStack(spacing: 0) {
             leading(limits)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,21 +199,21 @@ struct IslandCompactContent: View {
     private func leading(_ limits: ProviderLimits?) -> some View {
         HStack(spacing: 6) {
             if let limits, let window = IslandData.primaryWindow(limits) {
+                let remaining = preferences.barsShowRemaining && !limits.isEstimate
                 ProviderLogo(agent: limits.agent, size: 14)
-                IslandRing(
-                    fraction: min(max(window.usedPercent, 0), 100) / 100,
-                    color: IslandRingColor.color(agent: limits.agent, usedPercent: window.usedPercent),
-                    lineWidth: 2.5
-                )
-                .frame(width: 15, height: 15)
-                Text(limits.isEstimate
-                     ? Format.peakPercent(window.usedPercent)
-                     : IslandText.rowAmount(window, showRemaining: preferences.barsShowRemaining, isEstimate: false))
-                    .font(.system(size: 11.5, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize()
-                    .foregroundStyle(window.usedPercent >= 90 ? IslandTheme.critical : .white)
+                VStack(alignment: .leading, spacing: -1) {
+                    Text(limits.isEstimate
+                         ? Format.peakPercent(window.usedPercent)
+                         : IslandText.percent(remaining ? 100 - window.usedPercent : window.usedPercent))
+                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(window.usedPercent >= 90 ? IslandTheme.critical : .white)
+                    Text(limits.isEstimate ? "of peak" : remaining ? "left" : "used")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                }
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
             } else {
                 Image(systemName: "gauge.with.dots.needle.33percent")
                     .font(.system(size: 12, weight: .semibold))
@@ -282,50 +228,40 @@ struct IslandCompactContent: View {
         } ?? "No limits")
     }
 
-    /// The right wing takes turns: this provider's reset countdown, then
-    /// today's total spend, each for half of the provider's turn.
+    /// The right wing: today's total spend over this provider's reset
+    /// countdown.
     private func trailing(_ limits: ProviderLimits?, now: Date) -> some View {
         let resetsAt = limits.flatMap(IslandData.primaryWindow)?.resetsAt
         let today = IslandData.today(snapshot, preferences: preferences, now: now)
-        let showsSpend = IslandData.peekShowsSpend(now: now) || resetsAt == nil
         let isWarning = IslandData.status(state, fetchedAt: snapshot?.fetchedAt, now: now).isWarning
         return HStack(spacing: 5) {
             if isAwake {
                 Image(systemName: "eye.fill")
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(IslandTheme.secondaryText)
                     .accessibilityLabel("Keeping awake")
             }
-            Group {
-                if showsSpend {
-                    HStack(alignment: .firstTextBaseline, spacing: 3) {
-                        Text(today.map { Format.cost($0.cost) } ?? "$0")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(isWarning ? IslandTheme.warning : .white)
-                        Text("today")
-                            .font(.system(size: 9.5, weight: .medium))
-                            .foregroundStyle(IslandTheme.secondaryText)
-                    }
+            VStack(alignment: .trailing, spacing: -1) {
+                Text(today.map { Format.cost($0.cost) } ?? "$0")
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isWarning ? IslandTheme.warning : .white)
+                    .contentTransition(.numericText())
                     .accessibilityLabel("Today \(today.map { Format.cost($0.cost) } ?? "no spend")")
-                } else if let resetsAt {
-                    HStack(spacing: 4) {
+                if let resetsAt {
+                    HStack(spacing: 2) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(IslandTheme.secondaryText)
+                            .font(.system(size: 7, weight: .bold))
                         Text(IslandText.resetsIn(resetsAt, now: now))
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
+                            .font(.system(size: 9, weight: .medium))
                     }
+                    .foregroundStyle(IslandTheme.secondaryText)
                     .accessibilityLabel("Resets in \(IslandText.resetsIn(resetsAt, now: now))")
                 }
             }
             .monospacedDigit()
             .lineLimit(1)
             .fixedSize()
-            .id(showsSpend)
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
-        .animation(IslandTheme.morph, value: showsSpend)
     }
 }
 

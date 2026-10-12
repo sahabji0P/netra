@@ -32,7 +32,7 @@ final class NotchGeometryTests: XCTestCase {
         let resting = NotchGeometry.islandFrame(.resting, layout: layout, sizes: sizes)
         XCTAssertEqual(resting.midX, -960)
         XCTAssertEqual(resting.maxY, 1080)
-        XCTAssertEqual(resting.size, CGSize(width: sizes.pillRestWidth, height: sizes.glowHeight))
+        XCTAssertEqual(resting.size, CGSize(width: 2 * sizes.wingWidth, height: 24))
     }
 
     func testAutoHiddenMenuBarUsesFallbackHeight() {
@@ -81,18 +81,16 @@ final class NotchGeometryTests: XCTestCase {
         }
     }
 
-    func testRestingCoversOnlyTheNotchAndItsGlow() {
+    func testRestingWingsSitBesideTheNotch() {
         let layout = NotchGeometry.layout(for: notched)
         let resting = NotchGeometry.islandFrame(.resting, layout: layout, sizes: sizes)
-        // No wings at rest, so menu-bar items beside the notch stay clickable.
-        XCTAssertEqual(sizes.wingWidth, 0)
-        XCTAssertEqual(resting, CGRect(x: 662, y: 950 - sizes.glowHeight, width: 188, height: 32 + sizes.glowHeight))
+        XCTAssertEqual(resting, CGRect(x: 662 - sizes.wingWidth, y: 950, width: 188 + 2 * sizes.wingWidth, height: 32))
     }
 
-    func testPeekGrowsWingsBesideTheNotch() {
+    func testPeekGrowsTheWingsSlightly() {
         let layout = NotchGeometry.layout(for: notched)
         let peek = NotchGeometry.islandFrame(.peek, layout: layout, sizes: sizes)
-        XCTAssertEqual(peek.width, 188 + 2 * sizes.peekWingWidth)
+        XCTAssertEqual(peek.width, 188 + 2 * (sizes.wingWidth + sizes.peekWingGrowth))
         XCTAssertEqual(peek.midX, layout.notch.midX, accuracy: 0.001)
     }
 

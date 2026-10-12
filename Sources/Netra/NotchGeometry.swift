@@ -11,14 +11,11 @@ enum IslandSurface: CaseIterable, Sendable {
 struct IslandSizes: Equatable, Sendable {
     /// Width of each "wing" beside the notch in the resting state (provider
     /// mark + ring on the left, today's cost on the right).
-    var wingWidth: CGFloat = 0
-    /// Height of the glow strip under the notch at rest.
-    var glowHeight: CGFloat = 4
-    /// Width of each wing beside the notch while peeking.
-    var peekWingWidth: CGFloat = 104
-    /// Width of the resting glow on screens without a notch, where it sits
-    /// at the top edge of the menu bar instead of under the camera.
-    var pillRestWidth: CGFloat = 140
+    /// Narrow enough to stay clear of the first status icon on a typical
+    /// MacBook menu bar; the content stacks on two lines to fit.
+    var wingWidth: CGFloat = 76
+    /// Extra width each wing gains while the pointer is over the island.
+    var peekWingGrowth: CGFloat = 8
     /// Extra width and height the resting shape grows by on hover.
     var peekGrowth = CGSize(width: 24, height: 6)
     var expanded = CGSize(width: 640, height: 480)
@@ -110,15 +107,16 @@ enum NotchGeometry {
 
     /// The island's size in a mode, before clamping to the screen.
     static func islandSize(_ surface: IslandSurface, layout: NotchLayout, sizes: IslandSizes) -> CGSize {
-        let resting = layout.hasNotch
-            ? CGSize(width: layout.notch.width + 2 * sizes.wingWidth, height: layout.notch.height + sizes.glowHeight)
-            : CGSize(width: sizes.pillRestWidth, height: sizes.glowHeight)
+        let resting = CGSize(
+            width: layout.notch.width + 2 * sizes.wingWidth,
+            height: layout.notch.height
+        )
         switch surface {
         case .resting:
             return resting
         case .peek:
             return CGSize(
-                width: layout.notch.width + 2 * sizes.peekWingWidth,
+                width: resting.width + 2 * sizes.peekWingGrowth,
                 height: layout.notch.height + sizes.peekGrowth.height
             )
         case .expanded:
