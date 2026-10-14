@@ -11,10 +11,11 @@ enum PricingAudit {
 
     // MARK: Hermes routing fix
 
-    /// ccusage 20.0.26 prices Hermes sessions billed through OpenAI under
-    /// `openai/<model>`, which its fuzzy LiteLLM lookup resolves to a
-    /// different model's rate (gpt-5.6-sol → OpenRouter's batch price, a
-    /// quarter of list). An override on that exact key restores list price;
+    /// ccusage prices Hermes sessions billed through OpenAI under
+    /// `openai/<model>`, which its fuzzy LiteLLM lookup can resolve to a
+    /// different model's rate (20.0.26: gpt-5.6-sol → OpenRouter's batch
+    /// price, a quarter of list; 20.0.32 still drifts from list on real
+    /// history). An override on that exact key pins list price;
     /// other agents price the bare model name and are unaffected.
     /// Returns override key → canonical model to price it as.
     static func hermesRoutingKeys(in report: CCUnifiedReport) -> [String: String] {

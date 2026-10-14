@@ -12,9 +12,10 @@ final class PinnedCCUsageTests: XCTestCase {
             .appendingPathComponent("ccusage-bin")
     }
 
-    /// ccusage 20.0.26 prices Hermes sessions billed through OpenAI under
-    /// `openai/<model>`, which resolves to OpenRouter's batch rate. The
-    /// override Netra writes for that exact key must restore list price
+    /// ccusage prices Hermes sessions billed through OpenAI under
+    /// `openai/<model>` through a fuzzy lookup (20.0.26 resolved it to
+    /// OpenRouter's batch rate). The override Netra writes for that exact
+    /// key must pin list price
     /// ($4 in / $20 out / $0.40 cache read per 1M for gpt-5.6-sol).
     func testHermesOpenAIRoutingOverrideRestoresListPrice() throws {
         let home = try temporaryHome()
@@ -84,26 +85,45 @@ final class PinnedCCUsageTests: XCTestCase {
     /// Gateways that answer every response with one message ID and no
     /// request ID: ccusage 20.0.24 counted each response in the unified
     /// report but collapsed them in `blocks`, so the 5h block estimate
-    /// undercounted. Each response must count once, in both reports.
+    /// undercounted. Each response must count once, in both reports. The
+    /// placeholder ID has no `msg_` prefix: since 20.0.28 ccusage treats
+    /// `msg_` IDs as real Anthropic IDs (see the content-block test below).
     func testRequestlessGatewayResponsesCountOnceInReportAndBlocks() throws {
+        try assertClaudeFixture("claude-requestless-gateway.jsonl", day: "2026-09-15", countsTokens: 4_500)
+    }
+
+    /// Proxies that drop the request ID still get one line per content block
+    /// (thinking, text, tool_use) with the same Anthropic `msg_` ID, usage,
+    /// and session but distinct timestamps. ccusage 20.0.26 counted every
+    /// line, inflating Claude totals 2–3×; the response must count once.
+    func testRequestlessContentBlockLinesCountOnceInReportAndBlocks() throws {
+        try assertClaudeFixture("claude-requestless-content-blocks.jsonl", day: "2026-09-16", countsTokens: 1_500)
+    }
+
+    private func assertClaudeFixture(
+        _ name: String, day: String, countsTokens tokens: Int, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         let home = try temporaryHome()
         defer { try? FileManager.default.removeItem(at: home) }
         let project = home.appendingPathComponent(".claude/projects/-synthetic", isDirectory: true)
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         let fixture = try XCTUnwrap(Bundle.module.url(
-            forResource: "claude-requestless-gateway.jsonl", withExtension: nil, subdirectory: "Fixtures"
+            forResource: name, withExtension: nil, subdirectory: "Fixtures"
         ))
         try FileManager.default.copyItem(at: fixture, to: project.appendingPathComponent("session.jsonl"))
 
         let report = try runReport(home: home)
-        XCTAssertEqual(report.daily?.first { $0.period == "2026-09-15" }?.totalTokens, 4_500)
-        XCTAssertEqual(report.weekly?.reduce(0) { $0 + $1.totalTokens }, 4_500)
-        XCTAssertEqual(report.monthly?.first { $0.period == "2026-09" }?.totalTokens, 4_500)
+        XCTAssertEqual(report.daily?.first { $0.period == day }?.totalTokens, tokens, file: file, line: line)
+        XCTAssertEqual(report.weekly?.reduce(0) { $0 + $1.totalTokens }, tokens, file: file, line: line)
+        XCTAssertEqual(report.monthly?.first { $0.period == "2026-09" }?.totalTokens, tokens, file: file, line: line)
         let blocks = try JSONDecoder().decode(
             CCBlocksReport.self,
             from: runBinary(home: home, arguments: ["blocks", "--json", "--offline", "--since", "20260901"])
         )
-        XCTAssertEqual(blocks.blocks?.filter { $0.isGap != true }.reduce(0) { $0 + $1.totalTokens }, 4_500)
+        XCTAssertEqual(
+            blocks.blocks?.filter { $0.isGap != true }.reduce(0) { $0 + $1.totalTokens }, tokens,
+            file: file, line: line
+        )
     }
 
     /// Claude Code 2.1.266–2.1.278 wrote `usage.iterations[].model: null`;
