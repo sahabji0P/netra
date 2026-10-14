@@ -9,13 +9,13 @@ final class NotchGeometryTests: XCTestCase {
         leftAuxiliaryWidth: 662,
         rightAuxiliaryWidth: 662,
         menuBarHeight: 32,
-        isMain: false
+        isPrimary: false
     )
     private let external = ScreenDescriptor(
         frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080),
         safeAreaTop: 0,
         menuBarHeight: 24,
-        isMain: true
+        isPrimary: true
     )
     private let sizes = IslandSizes.standard
 
@@ -53,7 +53,7 @@ final class NotchGeometryTests: XCTestCase {
     func testPreferredScreenIsNotchedThenMainThenFirst() {
         XCTAssertEqual(NotchGeometry.preferredScreenIndex([external, notched]), 1)
         var plain = external
-        plain.isMain = false
+        plain.isPrimary = false
         XCTAssertEqual(NotchGeometry.preferredScreenIndex([plain, external]), 1)
         XCTAssertEqual(NotchGeometry.preferredScreenIndex([plain]), 0)
         XCTAssertNil(NotchGeometry.preferredScreenIndex([]))
@@ -128,6 +128,51 @@ final class NotchGeometryTests: XCTestCase {
         XCTAssertEqual(local.minY, 0)
         XCTAssertEqual(local.midX, panel.width / 2, accuracy: 0.001)
         XCTAssertEqual(local.size, resting.size)
+    }
+
+    // MARK: Pointer and screen rules
+
+    func testActivityGrowingUnderStillPointerDoesNotEnter() {
+        var tracker = IslandPointerTracker()
+        XCTAssertEqual(tracker.update(isInside: true, source: .frameChange), .none)
+        XCTAssertTrue(tracker.isInside)
+        // Small moves inside the grown island stay quiet...
+        XCTAssertEqual(tracker.update(isInside: true, source: .movement), .none)
+        // ...leaving still counts, and coming back is a real entry.
+        XCTAssertEqual(tracker.update(isInside: false, source: .movement), .exited)
+        XCTAssertEqual(tracker.update(isInside: true, source: .movement), .entered)
+    }
+
+    func testIslandMovingAwayFromPointerStillExits() {
+        var tracker = IslandPointerTracker()
+        XCTAssertEqual(tracker.update(isInside: true, source: .movement), .entered)
+        XCTAssertEqual(tracker.update(isInside: false, source: .frameChange), .exited)
+    }
+
+    func testRestingNotchedIslandOnlyTakesTheNotch() {
+        let layout = NotchGeometry.layout(for: notched)
+        XCTAssertEqual(NotchGeometry.hitFrame(.resting, layout: layout, sizes: sizes), layout.notch)
+        for surface in [IslandSurface.peek, .expanded, .activity] {
+            XCTAssertEqual(
+                NotchGeometry.hitFrame(surface, layout: layout, sizes: sizes),
+                NotchGeometry.islandFrame(surface, layout: layout, sizes: sizes)
+            )
+        }
+        let pill = NotchGeometry.layout(for: external)
+        XCTAssertEqual(
+            NotchGeometry.hitFrame(.resting, layout: pill, sizes: sizes),
+            NotchGeometry.islandFrame(.resting, layout: pill, sizes: sizes)
+        )
+    }
+
+    func testPillHidesWithoutAMenuBarButNotchDoesNot() {
+        XCTAssertTrue(NotchGeometry.showsIsland(on: external))
+        var hidden = external
+        hidden.menuBarHeight = 0
+        XCTAssertFalse(NotchGeometry.showsIsland(on: hidden))
+        var notchedHidden = notched
+        notchedHidden.menuBarHeight = 0
+        XCTAssertTrue(NotchGeometry.showsIsland(on: notchedHidden))
     }
 }
 

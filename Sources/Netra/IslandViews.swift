@@ -152,11 +152,9 @@ struct IslandCompactView: View {
         IslandCompactContent(
             snapshot: store.snapshot, state: store.state, preferences: preferences,
             isAwake: awake.isAwake, notchGap: notchGap,
-            barHeight: metrics.hasNotch ? metrics.notchHeight : Self.fallbackBarHeight
+            barHeight: metrics.hasNotch ? metrics.notchHeight : NotchGeometry.fallbackBarHeight
         )
     }
-
-    static let fallbackBarHeight: CGFloat = 24
 }
 
 struct IslandCompactContent: View {
@@ -172,7 +170,10 @@ struct IslandCompactContent: View {
     static let height: CGFloat = 32
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        // Nothing here needs seconds: countdowns are minute-grained and the
+        // providers rotate every `rotationInterval`. A slower tick keeps the
+        // always-visible window from waking every second.
+        TimelineView(.periodic(from: .now, by: IslandData.rotationInterval)) { context in
             let cards = IslandData.limitCards(snapshot, preferences: preferences, now: context.date)
             wings(IslandData.rotating(cards, now: context.date), now: context.date)
         }

@@ -29,7 +29,15 @@ final class IslandPanel: NSPanel {
         ignoresMouseEvents = true
         // Above the menu bar so the island can cover the notch row.
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        configure(hasNotch: true)
+    }
+
+    /// Over a fullscreen app the notch row stays black, so a notched island
+    /// may stay there; a pill on a plain screen would cover the app instead.
+    func configure(hasNotch: Bool) {
+        var behavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        if hasNotch { behavior.insert(.fullScreenAuxiliary) }
+        if collectionBehavior != behavior { collectionBehavior = behavior }
     }
 
     override var canBecomeKey: Bool { false }

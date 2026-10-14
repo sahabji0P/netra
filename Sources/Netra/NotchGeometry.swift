@@ -41,7 +41,9 @@ struct ScreenDescriptor: Equatable, Sendable {
     var rightAuxiliaryWidth: CGFloat?
     /// `frame.maxY - visibleFrame.maxY`; 0 when the menu bar auto-hides.
     var menuBarHeight: CGFloat
-    var isMain: Bool = false
+    /// The display that holds the menu bar (`NSScreen.screens.first`). Not
+    /// `NSScreen.main`, which follows the key window.
+    var isPrimary: Bool = false
 
     var hasNotch: Bool {
         safeAreaTop > 0
@@ -53,14 +55,14 @@ struct ScreenDescriptor: Equatable, Sendable {
 
 extension ScreenDescriptor {
     @MainActor
-    init(_ screen: NSScreen, isMain: Bool) {
+    init(_ screen: NSScreen, isPrimary: Bool) {
         self.init(
             frame: screen.frame,
             safeAreaTop: screen.safeAreaInsets.top,
             leftAuxiliaryWidth: screen.auxiliaryTopLeftArea?.width,
             rightAuxiliaryWidth: screen.auxiliaryTopRightArea?.width,
             menuBarHeight: screen.frame.maxY - screen.visibleFrame.maxY,
-            isMain: isMain
+            isPrimary: isPrimary
         )
     }
 }
@@ -80,12 +82,19 @@ enum NotchGeometry {
     /// Height used when a screen reports no menu bar (auto-hidden).
     static let fallbackBarHeight: CGFloat = 24
 
-    /// The built-in notched display when present, else the main screen, else
-    /// the first one. Returns an index into `screens`.
+    /// The built-in notched display when present, else the primary screen,
+    /// else the first one. Returns an index into `screens`.
     static func preferredScreenIndex(_ screens: [ScreenDescriptor]) -> Int? {
         screens.firstIndex(where: \.hasNotch)
-            ?? screens.firstIndex(where: \.isMain)
+            ?? screens.firstIndex(where: \.isPrimary)
             ?? (screens.isEmpty ? nil : 0)
+    }
+
+    /// Whether the island belongs on `screen` at all. Without a notch the pill
+    /// sits in the menu bar, so it is hidden while there is no menu bar to sit
+    /// in (auto-hidden), rather than covering window title bars.
+    static func showsIsland(on screen: ScreenDescriptor) -> Bool {
+        screen.hasNotch || screen.menuBarHeight > 0
     }
 
     static func layout(for screen: ScreenDescriptor) -> NotchLayout {
@@ -147,6 +156,15 @@ enum NotchGeometry {
             return CGSize(width: max(size.width, next.width), height: max(size.height, next.height))
         }
         return topCenteredRect(size: union, layout: layout, sizes: sizes)
+    }
+
+    /// Where the island reacts to the pointer and to clicks. At rest on a
+    /// notched screen that is only the notch: the wings may cover menu-bar
+    /// icons, and clicks there must still reach those icons. Once peeking or
+    /// open, the whole shape reacts.
+    static func hitFrame(_ surface: IslandSurface, layout: NotchLayout, sizes: IslandSizes) -> CGRect {
+        if surface == .resting, layout.hasNotch { return layout.notch }
+        return islandFrame(surface, layout: layout, sizes: sizes)
     }
 
     /// Converts a global island frame into the panel content's top-left

@@ -100,6 +100,26 @@ struct IslandModeMachine: Equatable, Sendable {
     }
 }
 
+/// Decides when the pointer counts as entering or leaving the island. Only
+/// real pointer movement can enter: when the island grows under a pointer
+/// that is standing still (an activity appearing, a display change) the
+/// pointer is quietly treated as already inside, so an alert is not dismissed
+/// or turned into an open island by a mouse nobody touched. Leaving always
+/// counts, so the island can never stay open after it moved away.
+struct IslandPointerTracker: Equatable, Sendable {
+    enum Source: Sendable { case movement, frameChange }
+    enum Transition: Equatable, Sendable { case none, entered, exited }
+
+    private(set) var isInside = false
+
+    mutating func update(isInside inside: Bool, source: Source) -> Transition {
+        guard inside != isInside else { return .none }
+        isInside = inside
+        if !inside { return .exited }
+        return source == .movement ? .entered : .none
+    }
+}
+
 /// Owns the notch island window: picks the screen, follows display changes,
 /// tracks the pointer, and morphs between resting, peek, expanded, and
 /// activity. Content is supplied as three SwiftUI roots; the shell has no
@@ -119,6 +139,12 @@ final class IslandController {
         didSet { if sizes != oldValue { relayout() } }
     }
     private(set) var isVisible = false
+    /// False while the chosen screen has no place for the island (no notch
+    /// and an auto-hidden menu bar); the panel is ordered out meanwhile.
+    private(set) var isOnScreen = false
+    /// Called with an activity's id when the user ends it early by pointing
+    /// at or clicking the island, so its queue can move on.
+    @ObservationIgnored var onActivityDismissed: ((String) -> Void)?
 
     /// How long the pointer rests on the island before peek becomes expanded.
     @ObservationIgnored var hoverHoldDelay: Duration = .milliseconds(650)
@@ -133,7 +159,8 @@ final class IslandController {
     @ObservationIgnored private var panel: IslandPanel?
     @ObservationIgnored private var monitors: [Any] = []
     @ObservationIgnored private var screenObserver: NSObjectProtocol?
-    @ObservationIgnored private var pointerInside = false
+    @ObservationIgnored private var pointer = IslandPointerTracker()
+    @ObservationIgnored private var screenAllowsIsland = true
     @ObservationIgnored private var hoverTask: Task<Void, Never>?
     @ObservationIgnored private var leaveTask: Task<Void, Never>?
     @ObservationIgnored private var activityTask: Task<Void, Never>?
@@ -175,6 +202,11 @@ final class IslandController {
         NotchGeometry.panelFrame(layout: layout, sizes: sizes)
     }
 
+    /// Where the pointer and clicks are taken; see `NotchGeometry.hitFrame`.
+    var hitFrame: CGRect {
+        NotchGeometry.hitFrame(mode.surface, layout: layout, sizes: sizes)
+    }
+
     var islandRectInPanel: CGRect {
         NotchGeometry.islandRectInPanel(islandFrame, panel: panelFrame)
     }
@@ -188,8 +220,6 @@ final class IslandController {
         self.panel = panel
         relayout()
         installMonitors()
-        panel.orderFrontRegardless()
-        updatePointer()
     }
 
     func hide() {
@@ -199,8 +229,9 @@ final class IslandController {
         hoverTask?.cancel()
         leaveTask?.cancel()
         activityTask?.cancel()
-        pointerInside = false
+        pointer = IslandPointerTracker()
         machine = IslandModeMachine()
+        isOnScreen = false
         panel?.orderOut(nil)
         // The hosting view holds the controller; dropping the panel breaks
         // that cycle. `show()` builds a fresh one.
@@ -230,8 +261,14 @@ final class IslandController {
         }
         guard machine != before else { return }
         scheduleActivityEnd()
-        if machine.mode.surface != before.mode.surface { updatePointer() }
+        if case .activity(let shown) = before.mode, Self.userEvents.contains(event),
+           machine.mode.surface != .activity {
+            onActivityDismissed?(shown.id)
+        }
+        if machine.mode.surface != before.mode.surface { updatePointer(.frameChange) }
     }
+
+    private static let userEvents: [IslandModeMachine.Event] = [.pointerEntered, .clicked, .expand, .collapse]
 
     private func scheduleActivityEnd() {
         activityTask?.cancel()
@@ -247,13 +284,14 @@ final class IslandController {
 
     /// Hit-tests the pointer against the island's current shape and turns
     /// mouse handling on only while it is inside.
-    private func updatePointer() {
+    private func updatePointer(_ source: IslandPointerTracker.Source) {
         guard isVisible, let panel else { return }
-        let inside = islandFrame.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation)
+        let inside = isOnScreen && hitFrame.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation)
         if panel.ignoresMouseEvents == inside { panel.ignoresMouseEvents = !inside }
-        guard inside != pointerInside else { return }
-        pointerInside = inside
-        if inside {
+        switch pointer.update(isInside: inside, source: source) {
+        case .none:
+            if inside { leaveTask?.cancel() }
+        case .entered:
             leaveTask?.cancel()
             send(.pointerEntered)
             hoverTask?.cancel()
@@ -262,7 +300,7 @@ final class IslandController {
                 guard !Task.isCancelled else { return }
                 self?.send(.hoverHeld)
             }
-        } else {
+        case .exited:
             hoverTask?.cancel()
             leaveTask?.cancel()
             leaveTask = Task { [weak self, leaveGrace] in
@@ -278,7 +316,7 @@ final class IslandController {
     private func makePanel() -> IslandPanel {
         let panel = IslandPanel()
         let host = IslandHostingView(rootView: IslandRootView(controller: self))
-        host.onPointerMoved = { [weak self] in self?.updatePointer() }
+        host.onPointerMoved = { [weak self] in self?.updatePointer(.movement) }
         panel.contentView = host
         return panel
     }
@@ -286,14 +324,22 @@ final class IslandController {
     private func relayout() {
         if let screen = Self.currentScreen() {
             layout = NotchGeometry.layout(for: screen)
+            screenAllowsIsland = NotchGeometry.showsIsland(on: screen)
         }
-        panel?.setFrame(panelFrame, display: isVisible)
-        updatePointer()
+        if let panel, isVisible {
+            panel.configure(hasNotch: layout.hasNotch)
+            panel.setFrame(panelFrame, display: true)
+            if screenAllowsIsland != isOnScreen {
+                isOnScreen = screenAllowsIsland
+                if isOnScreen { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
+            }
+        }
+        updatePointer(.frameChange)
     }
 
     private static func currentScreen() -> ScreenDescriptor? {
-        let main = NSScreen.main
-        let screens = NSScreen.screens.map { ScreenDescriptor($0, isMain: $0 == main) }
+        let primary = NSScreen.screens.first
+        let screens = NSScreen.screens.map { ScreenDescriptor($0, isPrimary: $0 == primary) }
         return NotchGeometry.preferredScreenIndex(screens).map { screens[$0] }
     }
 
@@ -301,7 +347,7 @@ final class IslandController {
         let moved: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
         // Fires while another app is frontmost, which is nearly always.
         if let global = NSEvent.addGlobalMonitorForEvents(matching: moved, handler: { [weak self] _ in
-            MainActor.assumeIsolated { self?.updatePointer() }
+            MainActor.assumeIsolated { self?.updatePointer(.movement) }
         }) {
             monitors.append(global)
         }
@@ -311,7 +357,7 @@ final class IslandController {
                 if event.type == .leftMouseDown {
                     if event.window === self.panel, self.mode != .expanded { self.send(.clicked) }
                 } else {
-                    self.updatePointer()
+                    self.updatePointer(.movement)
                 }
             }
             return event

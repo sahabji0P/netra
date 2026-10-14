@@ -47,11 +47,12 @@ final class IslandCoordinator {
     // MARK: Events from existing hooks
 
     func resetDetected(_ celebration: ResetCelebration) {
+        guard controller != nil else { return }
         queue.enqueue(.windowReset(from: celebration))
     }
 
     func accountSwitched(_ provider: AccountProvider) {
-        if let activity = IslandActivity.accountSwitched(provider: provider, in: accounts) {
+        if controller != nil, let activity = IslandActivity.accountSwitched(provider: provider, in: accounts) {
             queue.enqueue(activity)
         }
     }
@@ -66,6 +67,9 @@ final class IslandCoordinator {
             controller?.hide()
             controller = nil
             queue.clear()
+            // Re-enabling starts comparing afresh, so nothing that changed
+            // while the island was off is announced late.
+            watcher = IslandLimitWatcher()
         }
     }
 
@@ -89,6 +93,10 @@ final class IslandCoordinator {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         controller.sizes.expanded.width = IslandExpandedContent.width
+        controller.onActivityDismissed = { [weak self] id in
+            guard let self, queue.current?.id == id else { return }
+            queue.dismissCurrent()
+        }
         return controller
     }
 
@@ -96,7 +104,8 @@ final class IslandCoordinator {
     /// a short screen; taller content scrolls.
     private func expandedContentHeight(_ height: CGFloat) {
         guard let controller else { return }
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+        // The island's own screen, below its menu bar or notch.
+        let screenHeight = controller.layout.screenFrame.height - controller.layout.notch.height
         let target = min(height, screenHeight * 0.85).rounded(.up)
         var sizes = controller.sizes
         guard abs(sizes.expanded.height - target) > 1 else { return }
