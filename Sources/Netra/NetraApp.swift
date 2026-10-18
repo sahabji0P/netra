@@ -22,7 +22,7 @@ struct NetraApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var preferences: AppPreferences
     @State private var store: UsageStore
-    @State private var updates = UpdateChecker()
+    @State private var updates: UpdateChecker
     @State private var desktopConfetti = DesktopConfetti()
     @State private var accounts: AccountStore
     @State private var awake: AwakeController
@@ -36,9 +36,10 @@ struct NetraApp: App {
         let awake = AwakeController()
         let navigation = DashboardNavigation()
         let store = UsageStore(preferences: preferences, accounts: accounts)
+        let updates = UpdateChecker()
         let island = IslandCoordinator(
             store: store, preferences: preferences, accounts: accounts,
-            awake: awake, dashboardNavigation: navigation
+            awake: awake, updates: updates, dashboardNavigation: navigation
         )
         // A switch refreshes limits at once, for the account now signed in.
         accounts.onSwitch = { [weak store, weak island] provider in
@@ -54,6 +55,7 @@ struct NetraApp: App {
         }
         _preferences = State(initialValue: preferences)
         _store = State(initialValue: store)
+        _updates = State(initialValue: updates)
         _desktopConfetti = State(initialValue: confetti)
         _accounts = State(initialValue: accounts)
         _awake = State(initialValue: awake)

@@ -140,10 +140,13 @@ them; only the notch itself reacts. Hover over the notch to open a card
 per provider: rings with an elapsed-time tick, the reset countdown, the weekly limit and its
 reset, the provider's spend today, banked resets with the next expiry (tap
 for every credit), and the live account (tap it to switch to another saved
-one). Below the cards sit today's total with a 30-day strip and buttons for
-Keep Awake and the dashboard. Choose what the open island shows (including
-every limit window, pace, all saved accounts, and detailed stats) in
-Settings → Notch island.
+one). Below the cards sit today's total with a 30-day strip, a version pill
+(it turns orange and opens the release page when a newer Netra is out), and
+buttons for Keep Awake and the dashboard. Choose what the open island shows
+(including every limit window, pace, all saved accounts, and detailed stats)
+in Settings → Notch island. Detailed stats switch between Today, 7D, 30D, and
+90D; click any day in the activity strip to see that day's cost and tokens
+per model, and click it again (or ✕) to go back.
 
 It grows for a few seconds when a limit runs hot (your provider-limit alert
 threshold, 80% by default), is reached (with a live countdown to the reset),

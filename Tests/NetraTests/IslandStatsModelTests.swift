@@ -36,6 +36,86 @@ final class IslandStatsModelTests: XCTestCase {
         XCTAssertEqual(model.modelMix.first?.share ?? 0, 1, accuracy: 1e-9)
     }
 
+    func testRangeSetsTheMixWindowAndStripLength() {
+        let rows = [
+            F.day(0, [F.agent("claude", cost: 1, models: [("claude-opus-4-1-20250805", 1)])]),
+            F.day(10, [F.agent("codex", cost: 4, models: [("gpt-5", 4)])]),
+            F.day(60, [F.agent("cursor", cost: 9, models: [("default", 9)])]),
+        ]
+        func model(_ range: IslandStatsRange) -> IslandStatsModel {
+            IslandStatsModel(snapshot: F.snapshot(rows), hiddenProviders: [], range: range, now: F.now, calendar: F.calendar)
+        }
+        XCTAssertEqual(model(.today).modelMix.map(\.name), ["claude-opus-4-1"])
+        XCTAssertEqual(model(.week).modelMix.map(\.name), ["claude-opus-4-1"])
+        XCTAssertEqual(model(.month).modelMix.map(\.name), ["gpt-5", "claude-opus-4-1"])
+        XCTAssertEqual(model(.quarter).modelMix.map(\.name), ["Auto", "gpt-5", "claude-opus-4-1"])
+
+        XCTAssertEqual(model(.week).heatmap.count, 30)
+        XCTAssertEqual(model(.week).heatmap.filter(\.inRange).count, 7)
+        XCTAssertEqual(model(.week).heatmapTotal, 5, accuracy: 1e-9)
+        let quarter = model(.quarter)
+        XCTAssertEqual(quarter.heatmap.count, 90)
+        XCTAssertTrue(quarter.heatmap.allSatisfy(\.inRange))
+        XCTAssertEqual(quarter.heatmapTotal, 14, accuracy: 1e-9)
+        XCTAssertEqual(model(.today).spanCost, 1, accuracy: 1e-9)
+        XCTAssertEqual(model(.week).spanCost, 1, accuracy: 1e-9)
+        XCTAssertEqual(model(.month).spanCost, 5, accuracy: 1e-9)
+        XCTAssertEqual(quarter.spanCost, 14, accuracy: 1e-9)
+        // The today tile ignores the range.
+        XCTAssertEqual(quarter.today, model(.today).today)
+    }
+
+    func testSelectedDayShowsOnlyThatDayWithCostAndTokens() throws {
+        let rows = [
+            F.day(0, [F.agent("claude", cost: 1, models: [("claude-opus-4-1-20250805", 1)])]),
+            F.day(3, [
+                F.agent("claude", cost: 6, tokens: 6000, models: [("claude-opus-4-1-20250805", 4), ("claude-sonnet-4-5-20250929", 2)]),
+                F.agent("cursor-grok-bot", cost: 1.5, tokens: 900, models: [("grok-bot-automation", 1.5)]),
+            ]),
+        ]
+        let key = F.day(3, []).period
+        let model = IslandStatsModel(
+            snapshot: F.snapshot(rows), hiddenProviders: [], range: .month, selectedDay: key,
+            now: F.now, calendar: F.calendar
+        )
+        XCTAssertEqual(model.selectedDay?.period, key)
+        XCTAssertEqual(model.modelMix.map(\.name), ["claude-opus-4-1", "claude-sonnet-4-5", "Grok Bot · automation"])
+        let opus = try XCTUnwrap(model.modelMix.first)
+        XCTAssertEqual(opus.cost, 4, accuracy: 1e-9)
+        XCTAssertEqual(opus.tokens, 4000)
+        XCTAssertEqual(opus.share, 4 / 7.5, accuracy: 1e-9)
+        XCTAssertEqual(model.modelMix.last?.tokens, 900)
+        XCTAssertEqual(model.tokenMix.total, 6900)
+        XCTAssertEqual(model.spanCost, 7.5, accuracy: 1e-9)
+        XCTAssertEqual(model.spanTokens, 6900)
+
+        // An idle day selects but shows nothing; a key off the strip is ignored.
+        let idle = IslandStatsModel(
+            snapshot: F.snapshot(rows), hiddenProviders: [], selectedDay: F.day(1, []).period,
+            now: F.now, calendar: F.calendar
+        )
+        XCTAssertNotNil(idle.selectedDay)
+        XCTAssertTrue(idle.modelMix.isEmpty)
+        XCTAssertEqual(idle.tokenMix.total, 0)
+        let outside = IslandStatsModel(
+            snapshot: F.snapshot(rows), hiddenProviders: [], selectedDay: "2020-01-01",
+            now: F.now, calendar: F.calendar
+        )
+        XCTAssertNil(outside.selectedDay)
+        XCTAssertEqual(outside.modelMix.count, 3)
+    }
+
+    func testOtherSegmentSumsCostAndTokens() throws {
+        let rows = [F.day(0, [F.agent("claude", cost: 10, tokens: 10_000, models: [
+            ("a", 4), ("b", 3), ("c", 2), ("d", 0.6), ("e", 0.4),
+        ])])]
+        let model = IslandStatsModel(snapshot: F.snapshot(rows), hiddenProviders: [], now: F.now, calendar: F.calendar)
+        let other = try XCTUnwrap(model.modelMix.last)
+        XCTAssertEqual(other.name, "Other")
+        XCTAssertEqual(other.cost, 1, accuracy: 1e-9)
+        XCTAssertEqual(other.tokens, 1000)
+    }
+
     func testSingleDayInPriorWeekAveragesOverSevenDays() {
         let rows = [F.day(3, [F.agent("codex", cost: 14, tokens: 700)])]
         let model = IslandStatsModel(snapshot: F.snapshot(rows), hiddenProviders: [], now: F.now, calendar: F.calendar)

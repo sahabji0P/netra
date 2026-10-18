@@ -11,6 +11,7 @@ final class IslandCoordinator {
     private let preferences: AppPreferences
     private let accounts: AccountStore
     private let awake: AwakeController
+    private let updates: UpdateChecker?
     private let dashboardNavigation: DashboardNavigation
     private let queue = IslandActivityQueue()
     private var watcher = IslandLimitWatcher()
@@ -25,8 +26,10 @@ final class IslandCoordinator {
         preferences: AppPreferences,
         accounts: AccountStore,
         awake: AwakeController,
+        updates: UpdateChecker? = nil,
         dashboardNavigation: DashboardNavigation
     ) {
+        self.updates = updates
         self.store = store
         self.preferences = preferences
         self.accounts = accounts
@@ -74,7 +77,7 @@ final class IslandCoordinator {
     }
 
     private func makeController() -> IslandController {
-        let store = store, preferences = preferences, accounts = accounts, awake = awake
+        let store = store, preferences = preferences, accounts = accounts, awake = awake, updates = updates
         let controller = IslandController {
             IslandCompactHost(store: store, preferences: preferences, awake: awake)
         } expanded: { [weak self] in
@@ -84,6 +87,7 @@ final class IslandCoordinator {
                     preferences: preferences,
                     accounts: accounts,
                     awake: awake,
+                    updates: updates,
                     openDashboard: { self?.openDashboard($0) }
                 ),
                 onHeight: { self?.expandedContentHeight($0) }

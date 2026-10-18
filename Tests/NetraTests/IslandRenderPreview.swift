@@ -58,13 +58,17 @@ final class IslandRenderPreview: XCTestCase {
 
         // Expanded: full, with a notice, estimate-only, stale, and empty.
         render(
-            IslandExpandedContent(snapshot: snapshot, state: .fresh, preferences: preferences, accounts: accounts, awake: awake),
+            IslandExpandedContent(
+                snapshot: snapshot, state: .fresh, preferences: preferences, accounts: accounts, awake: awake,
+                version: IslandVersion(current: "1.3.0")
+            ),
             name: "island-expanded", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
         render(
             IslandExpandedContent(
                 snapshot: snapshot, state: .fresh, preferences: preferences,
-                accounts: AccountsRenderPreview.previewAccounts(withNotice: true), awake: awake
+                accounts: AccountsRenderPreview.previewAccounts(withNotice: true), awake: awake,
+                version: IslandVersion(current: "1.3.0", available: "1.3.1")
             ),
             name: "island-expanded-notice", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )

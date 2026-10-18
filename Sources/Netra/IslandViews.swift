@@ -412,6 +412,7 @@ struct IslandExpandedView: View {
     var preferences: AppPreferences
     var accounts: AccountStore?
     var awake: AwakeController
+    var updates: UpdateChecker? = nil
     /// Opens a dashboard page. The integration supplies it; without one the
     /// view opens the dashboard window itself, as the popover does.
     var openDashboard: ((DashboardSection) -> Void)? = nil
@@ -424,6 +425,9 @@ struct IslandExpandedView: View {
             snapshot: store.snapshot, state: store.state, preferences: preferences,
             accounts: accounts, awake: awake,
             claudeKeychainNeedsApproval: store.claudeKeychainNeedsApproval,
+            version: updates.flatMap { updates in
+                updates.currentVersion.map { IslandVersion(current: $0, available: updates.availableVersion) }
+            },
             openDashboard: open
         )
     }
@@ -443,6 +447,8 @@ struct IslandExpandedContent: View {
     var accounts: AccountStore?
     @Bindable var awake: AwakeController
     var claudeKeychainNeedsApproval = false
+    /// The running build and any newer release; nil in unbundled dev runs.
+    var version: IslandVersion? = nil
     var openDashboard: (DashboardSection) -> Void = { _ in }
 
     static let width: CGFloat = 580
@@ -506,6 +512,9 @@ struct IslandExpandedContent: View {
                     .font(.system(size: 10))
                     .foregroundStyle(status.isWarning ? IslandTheme.warning : IslandTheme.secondaryText)
                     .lineLimit(1)
+            }
+            if let version {
+                IslandVersionPill(version: version)
             }
             if preferences.showsIslandSection(.keepAwake) {
                 IslandRoundButton(
@@ -581,6 +590,52 @@ struct IslandExpandedContent: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
         .background(IslandTheme.card, in: RoundedRectangle(cornerRadius: IslandTheme.cardRadius, style: .continuous))
+    }
+}
+
+/// The running build, and whether a newer release is out.
+struct IslandVersion: Equatable, Sendable {
+    var current: String
+    var available: String?
+}
+
+/// "v1.3.0" in grey; once a newer release exists it turns orange, reads
+/// "Update 1.3.1", and opens the release page (updates install via Homebrew).
+struct IslandVersionPill: View {
+    var version: IslandVersion
+
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if let available = version.available {
+            Button {
+                openURL(URL(string: "https://github.com/\(UpdateChecker.owner)/\(UpdateChecker.repo)/releases/latest")!)
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 8.5, weight: .bold))
+                    Text("Update \(available)")
+                }
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(IslandTheme.update)
+                .padding(.horizontal, 9)
+                .frame(height: 22)
+                .background(IslandTheme.update.opacity(0.16), in: Capsule())
+                .overlay { Capsule().strokeBorder(IslandTheme.update.opacity(0.45), lineWidth: 0.75) }
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("Netra \(available) is out (you have \(version.current)). Update with brew upgrade netra.")
+        } else {
+            Text("v\(version.current)")
+                .font(.system(size: 10.5, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(IslandTheme.secondaryText)
+                .padding(.horizontal, 9)
+                .frame(height: 22)
+                .background(IslandTheme.track, in: Capsule())
+                .help("Netra \(version.current)")
+        }
     }
 }
 

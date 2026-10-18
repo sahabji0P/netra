@@ -27,6 +27,9 @@ final class IslandStatsRenderPreview: XCTestCase {
         render(busy, preferences, name: "island-stats", outputDir: outputDir)
         render(F.snapshot(Self.busyMonth()), preferences, name: "island-stats-no-block", outputDir: outputDir)
         render(F.snapshot([]), preferences, name: "island-stats-empty", outputDir: outputDir)
+        render(busy, preferences, range: .quarter, name: "island-stats-90d", outputDir: outputDir)
+        render(busy, preferences, range: .month, selectedDay: F.day(3, []).period,
+               name: "island-stats-selected-day", outputDir: outputDir)
         render(
             F.snapshot([F.day(0, [F.agent("claude", cost: 3.2, input: 40_000, output: 22_000, cacheWrite: 90_000,
                                           cacheRead: 1_100_000, models: [("claude-sonnet-4-5-20250929", 3.2)])])]),
@@ -59,8 +62,14 @@ final class IslandStatsRenderPreview: XCTestCase {
         }
     }
 
-    private func render(_ snapshot: UsageSnapshot, _ preferences: AppPreferences, name: String, outputDir: String) {
-        let view = IslandStatsStrip(snapshot: snapshot, preferences: preferences, now: F.now, calendar: F.calendar)
+    private func render(
+        _ snapshot: UsageSnapshot, _ preferences: AppPreferences,
+        range: IslandStatsRange = .week, selectedDay: String? = nil, name: String, outputDir: String
+    ) {
+        let view = IslandStatsStrip(
+            snapshot: snapshot, preferences: preferences, now: F.now, calendar: F.calendar,
+            range: range, selectedDay: selectedDay
+        )
             .padding(16)
             .frame(width: 620)
             .background(IslandTheme.background)
