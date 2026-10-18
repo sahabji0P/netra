@@ -197,6 +197,10 @@ enum CursorUsageFetcher {
         )
     }
 
+    /// Label of the Grok Bot window inside `CursorQuota.windows`; the limit
+    /// summary lifts that window out into its own provider card.
+    static let grokWindowLabel = "Grok Bot"
+
     /// The Grok Bot weekly window. Skipped when the plan has no included Grok
     /// allowance (`hasNonZeroIncludedLimit != true`).
     static func grokWindow(fromSandStatus data: Data) -> QuotaWindow? {
@@ -207,7 +211,7 @@ enum CursorUsageFetcher {
         let start = (object["currentPeriodStart"] as? String).flatMap(ISODate.parse)
         let length = reset.flatMap { reset in start.map { reset.timeIntervalSince($0) } }
         return QuotaWindow(
-            label: "Grok Bot", usedPercent: clampPercent(percent), resetsAt: reset,
+            label: grokWindowLabel, usedPercent: clampPercent(percent), resetsAt: reset,
             durationSeconds: length.flatMap { $0 > 0 ? $0 : nil }
         )
     }

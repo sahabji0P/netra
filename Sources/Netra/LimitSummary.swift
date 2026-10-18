@@ -48,6 +48,7 @@ extension UsageSnapshot {
             case "claude": claudeLimits(now: now)
             case "codex": codexLimits(now: now)
             case "cursor": cursorLimits(now: now)
+            case CursorUsageEvents.grokBotAgent: grokBotLimits(now: now)
             default: nil
             }
         }
@@ -111,12 +112,33 @@ extension UsageSnapshot {
             .sorted { ($0.expiresAt ?? .distantFuture) < ($1.expiresAt ?? .distantFuture) }
     }
 
+    /// Cursor's plan windows. Grok Bot comes from the same Cursor login but
+    /// runs on its own weekly allowance, so it gets its own card instead.
     private func cursorLimits(now: Date) -> ProviderLimits? {
         guard let quota = cursorQuota else { return nil }
         let windows = quota.activeWindows(now: now)
+            .filter { $0.label != CursorUsageFetcher.grokWindowLabel }
         guard !windows.isEmpty else { return nil }
         return ProviderLimits(
             agent: "cursor", plan: quota.planType, source: "Reported by Cursor",
+            observedAt: quota.fetchedAt, windows: windows
+        )
+    }
+
+    /// Grok Bot's weekly window as its own provider; the card already names
+    /// Grok Bot, so the window reads simply "Weekly".
+    private func grokBotLimits(now: Date) -> ProviderLimits? {
+        guard let quota = cursorQuota else { return nil }
+        let windows = quota.activeWindows(now: now)
+            .filter { $0.label == CursorUsageFetcher.grokWindowLabel }
+            .map { window in
+                var window = window
+                window.label = "weekly"
+                return window
+            }
+        guard !windows.isEmpty else { return nil }
+        return ProviderLimits(
+            agent: CursorUsageEvents.grokBotAgent, plan: nil, source: "Reported by Cursor",
             observedAt: quota.fetchedAt, windows: windows
         )
     }

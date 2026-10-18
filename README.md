@@ -82,8 +82,10 @@ the CLI isn't installed or doesn't answer, Netra falls back to the newest
 Netra uses the login Cursor already saved on this Mac to read, from Cursor's
 own dashboard API:
 
-- Limits: included / API / Auto / on-demand / Grok Bot windows (checked at
-  most every 5 minutes).
+- Limits: included / API / Auto / on-demand windows (checked at most every
+  5 minutes). Grok Bot's weekly allowance gets its own **Grok Bot** card in
+  the popover, Subscriptions, and the notch island, which you can reorder and
+  hide on its own. It appears only when your plan includes Grok Bot.
 - Per-request usage history (`get-filtered-usage-events`) — every Cursor
   surface (editor, CLI, background agents, Grok Bot) on every machine. It is
   backfilled once for the same 190-day window as the other providers, then

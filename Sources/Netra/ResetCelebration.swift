@@ -105,12 +105,15 @@ extension UsageSnapshot {
         // boundary can be detected rather than the key disappearing.
         // Keyed per account when known, so switching accounts never reads
         // another account's reset boundary as a rollover.
-        func add(_ provider: String, _ quotaWindows: [QuotaWindow], account: String? = nil) {
+        func add(
+            _ provider: String, _ quotaWindows: [QuotaWindow], account: String? = nil,
+            creditedTo credit: (QuotaWindow) -> String? = { _ in nil }
+        ) {
             let scope = account.map { "\(provider)#\($0)" } ?? provider
             for window in quotaWindows {
                 windows.append(ResetWindow(
                     key: "\(scope):\(window.label)",
-                    provider: provider,
+                    provider: credit(window) ?? provider,
                     resetsAt: window.resetsAt
                 ))
             }
@@ -123,7 +126,13 @@ extension UsageSnapshot {
         if let codex = codexQuota, codex.source != .lastSeen {
             add("codex", codex.windows, account: codex.accountKey)
         }
-        if let cursor = cursorQuota { add("cursor", cursor.windows) }
+        // Grok Bot keeps its "cursor:Grok Bot" key (acknowledgments persist)
+        // but resets under its own name, matching its own limits card.
+        if let cursor = cursorQuota {
+            add("cursor", cursor.windows) { window in
+                window.label == CursorUsageFetcher.grokWindowLabel ? CursorUsageEvents.grokBotAgent : nil
+            }
+        }
         return windows
     }
 }

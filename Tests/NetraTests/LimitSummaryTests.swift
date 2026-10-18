@@ -81,13 +81,54 @@ final class LimitSummaryTests: XCTestCase {
         XCTAssertEqual(claude.iconWindows?.bottom?.label, "weekly · Fable")
     }
 
+    /// Grok Bot shares Cursor's login but has its own weekly allowance, so
+    /// it is lifted out of Cursor's card into a provider of its own.
+    func testGrokBotWindowBecomesItsOwnProvider() throws {
+        let cursor = CursorQuota(
+            windows: [
+                window(used: 54, elapsedFraction: 0.4, duration: 30 * 86400, label: "included usage"),
+                window(used: 88, elapsedFraction: 0.4, duration: 30 * 86400, label: "API models"),
+                window(used: 9, elapsedFraction: 0.2, label: CursorUsageFetcher.grokWindowLabel),
+            ],
+            planType: "pro", fetchedAt: now
+        )
+        let snapshot = UsageSnapshot(
+            fetchedAt: now, report: CCUnifiedReport(daily: [], weekly: [], monthly: []),
+            activeBlock: nil, codexQuota: nil, claudeQuota: nil, cursorQuota: cursor
+        )
+        let limits = snapshot.providerLimits(order: AppPreferences.limitProviders, now: now)
+        XCTAssertEqual(limits.map(\.agent), ["cursor", "cursor-grok-bot"])
+        XCTAssertEqual(limits[0].windows.map(\.label), ["included usage", "API models"])
+        XCTAssertEqual(limits[0].mostConstrained?.label, "API models")
+        let grok = limits[1]
+        XCTAssertEqual(grok.windows.map(\.label), ["weekly"])
+        XCTAssertEqual(try XCTUnwrap(grok.windows.first).usedPercent, 9)
+        XCTAssertEqual(grok.source, "Reported by Cursor")
+        XCTAssertNil(grok.plan)
+        // The reset keeps its stored key but is credited to Grok Bot.
+        let reset = try XCTUnwrap(snapshot.celebratableWindows().first { $0.key == "cursor:Grok Bot" })
+        XCTAssertEqual(reset.provider, "cursor-grok-bot")
+    }
+
+    func testNoGrokAllowanceMeansNoGrokCard() {
+        let cursor = CursorQuota(
+            windows: [window(used: 54, elapsedFraction: 0.4, duration: 30 * 86400, label: "included usage")],
+            planType: "pro", fetchedAt: now
+        )
+        let snapshot = UsageSnapshot(
+            fetchedAt: now, report: CCUnifiedReport(daily: [], weekly: [], monthly: []),
+            activeBlock: nil, codexQuota: nil, claudeQuota: nil, cursorQuota: cursor
+        )
+        XCTAssertEqual(snapshot.providerLimits(order: AppPreferences.limitProviders, now: now).map(\.agent), ["cursor"])
+    }
+
     @MainActor
     func testPersonalizationPreferencesPersist() {
         let suite = "NetraTests.LimitPrefs.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = AppPreferences(defaults: defaults)
-        XCTAssertEqual(preferences.orderedLimitProviders, ["claude", "codex", "cursor"])
+        XCTAssertEqual(preferences.orderedLimitProviders, ["claude", "codex", "cursor", "cursor-grok-bot"])
         preferences.barsShowRemaining = true
         preferences.resetTimeStyle = .clock
         preferences.showsPace = false
@@ -99,6 +140,6 @@ final class LimitSummaryTests: XCTestCase {
         XCTAssertEqual(reloaded.resetTimeStyle, .clock)
         XCTAssertFalse(reloaded.showsPace)
         XCTAssertEqual(reloaded.defaultPeriod, .week)
-        XCTAssertEqual(reloaded.orderedLimitProviders, ["claude", "cursor", "codex"])
+        XCTAssertEqual(reloaded.orderedLimitProviders, ["claude", "cursor", "codex", "cursor-grok-bot"])
     }
 }

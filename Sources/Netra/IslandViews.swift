@@ -30,8 +30,8 @@ enum IslandData {
     }
 
     /// The window shown beside the headline one (inner ring and the second
-    /// line): the weekly limit when the provider has one, so Cursor shows its
-    /// weekly Grok window rather than a sub-pool of the monthly allowance.
+    /// line): the weekly limit when the provider has one, otherwise the next
+    /// window (Cursor's API-models pool; Grok Bot is its own card).
     static func secondaryWindow(_ limits: ProviderLimits) -> QuotaWindow? {
         let others = Array(limits.windows.dropFirst())
         let week: Double = 7 * 24 * 3600

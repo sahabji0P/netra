@@ -158,7 +158,10 @@ final class IslandRenderPreview: XCTestCase {
             ]
         )
         let cursor = CursorQuota(
-            windows: [window("included usage", used: 27, duration: 30 * 86400, elapsed: 0.4)],
+            windows: [
+                window("included usage", used: 27, duration: 30 * 86400, elapsed: 0.4),
+                window(CursorUsageFetcher.grokWindowLabel, used: 9, duration: 7 * 86400, elapsed: 0.3),
+            ],
             planType: "pro", fetchedAt: now.addingTimeInterval(-120)
         )
         return UsageSnapshot(
@@ -232,9 +235,10 @@ final class IslandDataTests: XCTestCase {
         XCTAssertEqual(IslandData.primaryWindow(cursor)?.label, "included usage")
         // Without a weekly window the next one is the second line.
         XCTAssertEqual(IslandData.secondaryWindow(cursor)?.label, "API models")
-        var withGrok = cursor
-        withGrok.windows.append(QuotaWindow(label: "Grok Bot", usedPercent: 9, durationSeconds: 7 * 24 * 3600))
-        XCTAssertEqual(IslandData.secondaryWindow(withGrok)?.label, "Grok Bot")
+        // A week-long window wins the second line even when unlabeled.
+        var withWeek = cursor
+        withWeek.windows.append(QuotaWindow(label: "pool", usedPercent: 9, durationSeconds: 7 * 24 * 3600))
+        XCTAssertEqual(IslandData.secondaryWindow(withWeek)?.label, "pool")
         XCTAssertEqual(IslandData.secondaryWindow(claude)?.label, "weekly")
 
         let start = Date(timeIntervalSinceReferenceDate: 0)
@@ -274,10 +278,11 @@ final class IslandDataTests: XCTestCase {
         let now = Date.now
         let snapshot = IslandRenderPreview.snapshot(now: now)
         XCTAssertEqual(IslandData.limitCards(snapshot, preferences: preferences, now: now).map(\.agent),
-                       ["claude", "codex", "cursor"])
+                       ["claude", "codex", "cursor", "cursor-grok-bot"])
         XCTAssertEqual(IslandData.today(snapshot, preferences: preferences, now: now)?.cost ?? 0, 47.59, accuracy: 0.001)
 
         preferences.setProvider("codex", visibleInMenu: false)
+        preferences.setProvider("cursor-grok-bot", visibleInMenu: false)
         XCTAssertEqual(IslandData.limitCards(snapshot, preferences: preferences, now: now).map(\.agent),
                        ["claude", "cursor"])
         XCTAssertEqual(IslandData.today(snapshot, preferences: preferences, now: now)?.cost ?? 0, 38.42, accuracy: 0.001)

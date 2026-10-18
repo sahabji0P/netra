@@ -122,7 +122,7 @@ final class AppPreferences {
         didSet { defaults.set(defaultPeriod.rawValue, forKey: Key.defaultPeriod) }
     }
 
-    nonisolated static let limitProviders = ["claude", "codex", "cursor"]
+    nonisolated static let limitProviders = ["claude", "codex", "cursor", CursorUsageEvents.grokBotAgent]
 
     /// Known limit providers in the user's order.
     var orderedLimitProviders: [String] {

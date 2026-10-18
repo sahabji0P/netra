@@ -27,7 +27,16 @@ struct DashboardSubscriptionsView: View {
     }
 
     private var missing: [String] {
-        preferences.orderedLimitProviders.filter { agent in !limits.contains { $0.agent == agent } }
+        tabProviders.filter { agent in !limits.contains { $0.agent == agent } }
+    }
+
+    /// Grok Bot only appears once Cursor reports a Grok allowance: plans
+    /// without one have nothing to show, and Cursor's card already covers
+    /// connecting.
+    private var tabProviders: [String] {
+        preferences.orderedLimitProviders.filter { agent in
+            agent != CursorUsageEvents.grokBotAgent || limits.contains { $0.agent == agent }
+        }
     }
 
     var body: some View {
@@ -41,7 +50,7 @@ struct DashboardSubscriptionsView: View {
                 .disabled(store.state == .refreshing)
             }
             providerTabs
-            if let focus, preferences.orderedLimitProviders.contains(focus) {
+            if let focus, tabProviders.contains(focus) {
                 providerPage(focus)
             } else {
                 cardGrid {
@@ -72,7 +81,7 @@ struct DashboardSubscriptionsView: View {
     private var providerTabs: some View {
         HStack(spacing: 6) {
             tab(title: "All", agent: nil, count: nil)
-            ForEach(preferences.orderedLimitProviders, id: \.self) { agent in
+            ForEach(tabProviders, id: \.self) { agent in
                 tab(title: AgentPalette.shortName(agent), agent: agent, count: accountCount(agent))
             }
             Spacer()
@@ -524,6 +533,7 @@ struct DashboardSubscriptionsView: View {
         case "cursor": preferences.cursorUsageEnabled
             ? "Cursor is connected but hasn't reported limits yet. Make sure you're signed in to the Cursor app."
             : "Cursor isn't connected. Turn it on to read your limits and per-request usage from Cursor's own API."
+        case CursorUsageEvents.grokBotAgent: "Cursor hasn't reported a Grok Bot allowance for this plan."
         default: "No limit source."
         }
     }
