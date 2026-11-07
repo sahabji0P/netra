@@ -2,8 +2,9 @@ import Foundation
 import Observation
 
 /// Checks GitHub Releases once a day and surfaces a quiet "new version"
-/// notice. Updates themselves flow through Homebrew (`brew upgrade`) — this
-/// only closes the awareness gap of pull-based updates.
+/// notice. Updates themselves come from re-running `install.sh` (or
+/// `brew upgrade --cask netra`) — this only closes the awareness gap of
+/// pull-based updates.
 @MainActor
 @Observable
 final class UpdateChecker {
