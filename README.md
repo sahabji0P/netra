@@ -7,7 +7,30 @@ keep-awake.
 
 **Requires:** Apple Silicon Mac, macOS 14 (Sonoma) or newer.
 
-## Install (Homebrew)
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sahabji0P/netra/master/install.sh | sh
+```
+
+The [installer](install.sh) checks that the Mac is supported (Apple Silicon,
+macOS 14 or newer), downloads the latest release from GitHub, verifies its
+SHA-256 against the checksum published with the release, quits a running
+Netra, installs `Netra.app` into `/Applications` (or `~/Applications` when
+`/Applications` isn't writable — it never uses `sudo`), and opens it. To
+install a specific release, put `NETRA_VERSION=1.5.0` before `sh`. Feel free
+to read the script before piping it to a shell.
+
+**Why there's no "unidentified developer" prompt.** Netra isn't notarized by
+Apple yet (that needs a paid Apple Developer membership). Gatekeeper only
+checks files that carry the `com.apple.quarantine` flag, which browsers, Mail,
+AirDrop, and Homebrew casks add to what they download. `curl` doesn't add it,
+so the installed app opens without a dialog or "Open Anyway". The app is still
+code-signed, and the installer refuses a download whose checksum or signature
+doesn't verify — but the checksum comes from the same GitHub release as the
+app, so you are trusting this repository's releases, as with any download.
+
+### Homebrew (alternative)
 
 ```sh
 brew tap sahabji0P/tap
@@ -17,9 +40,11 @@ xattr -dr com.apple.quarantine /Applications/Netra.app   # until the app is nota
 open -a Netra
 ```
 
-Run the `xattr` line **before** the first launch — the app isn't notarized
-yet, so macOS quarantines it on download. If a "Netra is damaged" dialog ever
-appears, click **Cancel**, never "Move to Trash".
+Run the `xattr` line **before** the first launch — Homebrew quarantines the
+app on download. If a "Netra is damaged" dialog ever appears, click
+**Cancel**, never "Move to Trash". To move from Homebrew to the installer, run
+`brew uninstall --cask netra` first; otherwise the next `brew upgrade` replaces
+the app and quarantines it again.
 
 Look for the eye icon in your menu bar. Netra reads your local agent session
 logs (`~/.claude`, `~/.codex`, …), so stats appear once you've run an agent at
@@ -232,6 +257,15 @@ usage refresh.
 
 ## Upgrade
 
+Re-run the install command; it replaces the app in place and keeps your
+settings:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sahabji0P/netra/master/install.sh | sh
+```
+
+With Homebrew instead:
+
 ```sh
 brew update                      # refreshes the tap — required, upgrade won't see new versions without it
 brew upgrade --cask netra
@@ -240,6 +274,23 @@ xattr -dr com.apple.quarantine /Applications/Netra.app
 
 The app shows a quiet notice in its footer when a newer release exists.
 
+## Uninstall
+
+Turn off **Launch at login** in Netra's Settings first (only the app itself
+can remove that login item), then:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sahabji0P/netra/master/install.sh | sh -s -- --uninstall
+```
+
+This quits Netra and removes `Netra.app` from `/Applications` and
+`~/Applications`. Add `--purge` to also delete its settings, caches, and
+`~/Library/Application Support/Netra`. Keychain items (**Netra Account Vault**,
+the website publishing token) are never deleted by the script; remove them in
+Keychain Access if you don't need them. If Netra still appears under System
+Settings → General → Login Items, remove it there. Homebrew installs:
+`brew uninstall --cask netra`.
+
 ## Troubleshooting
 
 - **Brew keeps seeing an old version** → stale tap clone; re-clone it:
@@ -247,6 +298,8 @@ The app shows a quiet notice in its footer when a newer release exists.
 - **"App source '/Applications/Netra.app' is not there" during upgrade** → the
   app was deleted while brew still had it on record:
   `brew uninstall --cask --force netra && brew install --cask netra` (then the `xattr` line)
+- **Installer says a release has no `Netra.zip.sha256`** → that release predates
+  the installer (1.4.0 and earlier); install a newer one or use Homebrew.
 - **App runs but no stats** → the menu's empty state says why (since v0.1.2).
   From a terminal:
   `/Applications/Netra.app/Contents/Resources/ccusage-bin daily --json --offline | head -c 300`
@@ -267,9 +320,14 @@ scripts/build-app.sh 0.1.2    # assemble + sign dist/Netra.app
 scripts/release.sh 0.1.2      # zip → GitHub Release → bump Homebrew cask
 ```
 
+Each release carries `Netra-<version>.zip` (the Homebrew cask's URL), the same
+zip as `Netra.zip`, and `Netra.zip.sha256`; `install.sh` downloads the last two
+and refuses to install without a matching checksum. `release.sh` stops if the
+app's code signature doesn't verify (ad-hoc is enough on Apple Silicon).
+
 `release.sh` notarizes when `NETRA_NOTARY_PROFILE` is set (paid Apple
-Developer membership); otherwise it releases un-notarized and users must clear
-quarantine with the `xattr` command above.
+Developer membership); otherwise it releases un-notarized. Installer users get
+no prompt; Homebrew users must clear quarantine with the `xattr` command above.
 
 Before publishing, `release.sh` checks npm for a newer
 `@ccusage/ccusage-darwin-arm64` and stops if `ccusage-bin` is behind. Review
@@ -290,6 +348,7 @@ pinned binary against synthetic logs in `PinnedCCUsageTests`) — or set
   - `MenuView.swift` / `LimitsViews.swift` / `LimitSummary.swift` — the popover UI and limit/pace text rules
   - `Account*.swift`, `ClaudeAccountSession.swift`, `CodexAccountSession.swift` — multi-account roster, Keychain vault, and the Claude Code / Codex sign-in swap
   - `AccountsViews.swift` / `DashboardAccountsView.swift` — account switcher in the popover and the Accounts settings page
+- `install.sh` — curl installer and `--uninstall` (served from `master` via raw.githubusercontent.com)
 - `ccusage-bin` — pinned ccusage 20.0.32 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
 - `VERSION` — next app-bundle version used by local builds (publishing remains explicit)
 - `fixtures/` — captured real JSON output + benchmark notes

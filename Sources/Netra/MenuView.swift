@@ -530,7 +530,7 @@ struct MenuView: View {
     private var updateBanner: some View {
         HStack(spacing: 5) {
             Image(systemName: "arrow.down.circle")
-            Text("v\(updates.availableVersion ?? "") available · brew upgrade netra")
+            Text("v\(updates.availableVersion ?? "") available · re-run the installer")
             Spacer()
         }
         .font(.system(size: 11, weight: .medium))
