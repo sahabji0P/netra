@@ -2,6 +2,12 @@
 # Cuts a release: builds the app, zips it, publishes a GitHub Release, and
 # bumps the Homebrew cask. Requires `gh` to be authenticated.
 #
+# Release assets:
+#   Netra-<version>.zip   the Homebrew cask's download (versioned URL)
+#   Netra.zip             the same bytes under the stable name install.sh uses
+#   Netra.zip.sha256      its checksum ("<sha256>  Netra.zip"); install.sh
+#                         refuses to install without a match
+#
 # Usage: scripts/release.sh 0.1.0
 #
 # Optional notarization (needs a paid Apple Developer membership):
@@ -14,6 +20,7 @@ VERSION="$1"
 
 TAP_DIR="${NETRA_TAP_DIR:-../homebrew-tap}"
 ZIP="dist/Netra-${VERSION}.zip"
+STABLE_ZIP="dist/Netra.zip"
 
 # Netra's numbers are only as good as the pinned ccusage; never ship on a
 # stale one by accident. Upgrading still needs contract verification
@@ -37,17 +44,27 @@ if [[ -n "$NETRA_NOTARY_PROFILE" ]]; then
   rm dist/notarize-tmp.zip
 else
   echo "⚠ Skipping notarization (NETRA_NOTARY_PROFILE not set)."
-  echo "  Friends must clear quarantine: xattr -dr com.apple.quarantine /Applications/Netra.app"
+  echo "  install.sh users get no prompt; Homebrew users must clear quarantine:"
+  echo "  xattr -dr com.apple.quarantine /Applications/Netra.app"
 fi
 
+# Apple Silicon refuses to run unsigned code, and install.sh rejects a bundle
+# that fails this check, so never publish one. Ad-hoc is enough to pass.
+codesign --verify --deep --strict --verbose=1 dist/Netra.app
+echo "signed by: $(codesign -dvv dist/Netra.app 2>&1 | sed -n 's/^Authority=//p' | head -n 1 | grep . || echo ad-hoc)"
+# ditto keeps extended attributes; never ship a quarantine flag in the zip.
+xattr -dr com.apple.quarantine dist/Netra.app 2>/dev/null || true
+
 ditto -c -k --keepParent dist/Netra.app "$ZIP"
+cp "$ZIP" "$STABLE_ZIP"
 SHA256=$(shasum -a 256 "$ZIP" | awk '{print $1}')
+(cd dist && shasum -a 256 Netra.zip > Netra.zip.sha256)
 echo "sha256: $SHA256"
 
 # -c tag.gpgSign=false: signed tags hang without an interactive GPG prompt.
 git -c tag.gpgSign=false tag "v${VERSION}" 2>/dev/null || echo "(tag v${VERSION} already exists)"
 git push origin "v${VERSION}"
-gh release create "v${VERSION}" "$ZIP" \
+gh release create "v${VERSION}" "$ZIP" "$STABLE_ZIP" "$STABLE_ZIP.sha256" \
   --title "Netra ${VERSION}" \
   --generate-notes
 
