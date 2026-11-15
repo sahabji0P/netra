@@ -118,7 +118,7 @@ final class IslandRenderPreview: XCTestCase {
         let agents = [agent("claude", cost: 38.42, tokens: 41_200_000), agent("codex", cost: 9.17, tokens: 12_800_000)]
         let report = CCUnifiedReport(
             daily: [row(PeriodKeys.day(now), agents)],
-            weekly: [row(PeriodKeys.weekStart(now).key, agents)],
+            weekly: [],
             monthly: []
         )
         func window(_ label: String, used: Double, duration: TimeInterval, elapsed: Double) -> QuotaWindow {

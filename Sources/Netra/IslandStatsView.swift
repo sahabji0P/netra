@@ -124,10 +124,11 @@ struct IslandStatsModel: Equatable, Sendable {
         let daily = (snapshot?.daily ?? []).map { $0.filtered(hidingProviders: hiddenProviders) }
         let byDay = Dictionary(daily.map { ($0.period, $0) }, uniquingKeysWith: { first, _ in first })
         let todayStart = calendar.startOfDay(for: now)
+        let keys = PeriodKeys.keyer(calendar)
 
         func day(_ offset: Int) -> (key: String, date: Date) {
             let date = calendar.date(byAdding: .day, value: -offset, to: todayStart) ?? todayStart
-            return (PeriodKeys.day(date, calendar), date)
+            return (keys.day(date), date)
         }
         func rows(lastDays count: Int, skippingToday: Bool = false) -> [PeriodRow] {
             let offsets = skippingToday ? Array(1...count) : Array(0..<count)

@@ -45,6 +45,88 @@ final class PinnedCCUsageTests: XCTestCase {
         for cost in costs { XCTAssertEqual(cost, 0.64, accuracy: 0.001) }
     }
 
+    /// Codex compresses rollouts older than a few days to `.jsonl.zst`, in
+    /// `sessions/` and `archived_sessions/` alike. ccusage 20.0.32 skipped
+    /// them, hiding almost all Codex history; they must count like plain ones.
+    func testCompressedCodexRolloutsAreCounted() throws {
+        let home = try codexHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let report = try runReport(home: home)
+        let codex = Dictionary(uniqueKeysWithValues: (report.daily ?? []).compactMap { row in
+            row.agents?.first { $0.agent == "codex" }.map { (row.period, $0.totalTokens) }
+        })
+        XCTAssertEqual(codex, ["2026-09-10": 3_500, "2026-09-12": 3_500])
+    }
+
+    /// A refresh reads only the trailing days and records them as complete.
+    /// That holds only if a `--since` report gives each day inside the window
+    /// exactly what a report over everything gives it.
+    func testWindowedReportMatchesTheCompleteReportForItsDays() throws {
+        let home = try codexHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let arguments = ["daily", "--sections", "daily,weekly,monthly", "--by-agent", "--json", "--offline"]
+        let complete = try JSONDecoder().decode(
+            CCUnifiedReport.self, from: runBinary(home: home, arguments: arguments)
+        )
+        let windowed = try JSONDecoder().decode(
+            CCUnifiedReport.self, from: runBinary(home: home, arguments: arguments + ["--since", "20260912"])
+        )
+        XCTAssertEqual(complete.daily?.map(\.period), ["2026-09-10", "2026-09-12"])
+        XCTAssertEqual(windowed.daily?.map(\.period), ["2026-09-12"])
+        let whole = try XCTUnwrap(complete.daily?.last), recent = try XCTUnwrap(windowed.daily?.last)
+        XCTAssertEqual(recent.totalTokens, whole.totalTokens)
+        XCTAssertEqual(recent.totalCost, whole.totalCost, accuracy: 0.000_001)
+        XCTAssertEqual(recent.agents?.map(\.agent), whole.agents?.map(\.agent))
+    }
+
+    /// Codex files a rollout under the day its session started. A session
+    /// started before the window and continued inside it must still be read
+    /// by a windowed report, or usage in long-lived sessions would lag until
+    /// the next complete scan.
+    func testWindowedReportCountsASessionStartedBeforeTheWindow() throws {
+        let home = try temporaryHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let directory = home.appendingPathComponent(".codex/sessions/2026/09/05", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let rollout = directory.appendingPathComponent(
+            "rollout-2026-09-05T10-00-00-00000000-0000-7000-8000-000000000009.jsonl"
+        )
+        try FileManager.default.copyItem(
+            at: XCTUnwrap(Bundle.module.url(
+                forResource: "codex-rollout-resumed.jsonl", withExtension: nil, subdirectory: "Fixtures"
+            )),
+            to: rollout
+        )
+        // Last written when its final turn ran, as a real rollout would be.
+        try FileManager.default.setAttributes(
+            [.modificationDate: XCTUnwrap(ISODate.parse("2026-09-12T09:00:05Z"))], ofItemAtPath: rollout.path
+        )
+
+        let windowed = try JSONDecoder().decode(CCUnifiedReport.self, from: runBinary(home: home, arguments: [
+            "daily", "--sections", "daily,weekly,monthly", "--by-agent", "--json", "--offline",
+            "--timezone", "UTC", "--since", "20260912",
+        ]))
+        XCTAssertEqual(windowed.daily?.map(\.period), ["2026-09-12"])
+        XCTAssertEqual(windowed.daily?.first?.agents?.first { $0.agent == "codex" }?.totalTokens, 700)
+    }
+
+    /// A Codex home with one compressed rollout (Sept 10) and one plain (Sept 12).
+    private func codexHome() throws -> URL {
+        let home = try temporaryHome()
+        for (fixture, day) in [("codex-rollout-compressed.jsonl.zst", "10"), ("codex-rollout-plain.jsonl", "12")] {
+            let directory = home.appendingPathComponent(".codex/sessions/2026/09/\(day)", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let source = try XCTUnwrap(Bundle.module.url(
+                forResource: fixture, withExtension: nil, subdirectory: "Fixtures"
+            ))
+            let suffix = fixture.hasSuffix(".zst") ? "jsonl.zst" : "jsonl"
+            try FileManager.default.copyItem(at: source, to: directory.appendingPathComponent(
+                "rollout-2026-09-\(day)T10-00-00-00000000-0000-7000-8000-0000000000\(day).\(suffix)"
+            ))
+        }
+        return home
+    }
+
     private func temporaryHome() throws -> URL {
         let home = FileManager.default.temporaryDirectory
             .appendingPathComponent("netra-ccusage-\(UUID().uuidString)", isDirectory: true)

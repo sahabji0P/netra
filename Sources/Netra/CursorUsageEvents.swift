@@ -47,7 +47,7 @@ struct CursorUsageEvent: Codable, Equatable, Sendable {
     }
 }
 
-/// Parses and aggregates Cursor usage events into Netra's period rows.
+/// Parses Cursor usage events and aggregates them into per-day usage.
 enum CursorUsageEvents {
     struct Page {
         var events: [CursorUsageEvent]
@@ -118,46 +118,28 @@ enum CursorUsageEvents {
         model.hasPrefix("grok-bot") ? grokBotAgent : "cursor"
     }
 
-    /// Cursor `AgentStat`s per period key (day `yyyy-MM-dd`, week start
-    /// `yyyy-MM-dd`, or month `yyyy-MM`) — one for regular usage and one for
-    /// Grok Bot where present — ready to merge into a snapshot.
-    static func agentStats(
+    /// Cursor usage per local day (`yyyy-MM-dd`), oldest first: one
+    /// `AgentStat` for regular usage and one for Grok Bot where present,
+    /// ready to record into the usage history.
+    static func dailyStats(
         from events: [CursorUsageEvent],
-        granularity: PeriodGranularity,
         calendar: Calendar = .current
-    ) -> [(period: String, date: Date, agent: AgentStat)] {
-        struct BucketKey: Hashable, Comparable {
-            var period: String
-            var agent: String
-            static func < (lhs: Self, rhs: Self) -> Bool {
-                (lhs.period, lhs.agent) < (rhs.period, rhs.agent)
-            }
-        }
-        var buckets: [BucketKey: (date: Date, events: [CursorUsageEvent])] = [:]
-        let gregorian = PeriodKeys.gregorian(calendar)
+    ) -> [(day: String, agents: [AgentStat])] {
+        let keys = PeriodKeys.keyer(calendar)
+        // Thousands of events fall on a few hundred days: key each day once.
+        var dayKeys: [Date: String] = [:]
+        var buckets: [String: [String: [CursorUsageEvent]]] = [:]
         for event in deduplicated(events) {
-            let day = gregorian.startOfDay(for: event.recordedAt)
-            let (period, date): (String, Date)
-            switch granularity {
-            case .day:
-                (period, date) = (PeriodKeys.day(day, calendar), day)
-            case .week:
-                // Monday-keyed like ccusage, whatever the locale's first weekday.
-                (period, date) = PeriodKeys.weekStart(day, calendar)
-            case .month:
-                period = PeriodKeys.month(day, calendar)
-                date = gregorian.dateInterval(of: .month, for: day)?.start ?? day
-            }
-            let key = BucketKey(period: period, agent: agentName(forModel: event.model))
-            var bucket = buckets[key] ?? (date, [])
-            bucket.events.append(event)
-            buckets[key] = bucket
+            let start = keys.startOfDay(event.recordedAt)
+            let day = dayKeys[start] ?? keys.day(start)
+            dayKeys[start] = day
+            buckets[day, default: [:]][agentName(forModel: event.model), default: []].append(event)
         }
-
-        return buckets.keys.sorted().compactMap { key in
-            guard let bucket = buckets[key],
-                  let agent = agentStat(bucket.events, name: key.agent) else { return nil }
-            return (key.period, bucket.date, agent)
+        return buckets.keys.sorted().compactMap { day in
+            let agents = (buckets[day] ?? [:])
+                .sorted { $0.key < $1.key }
+                .compactMap { agentStat($0.value, name: $0.key) }
+            return agents.isEmpty ? nil : (day, agents)
         }
     }
 
@@ -198,10 +180,6 @@ enum CursorUsageEvents {
         )
     }
 
-}
-
-enum PeriodGranularity: Sendable {
-    case day, week, month
 }
 
 /// Pages through `get-filtered-usage-events` for a time window. Pages are

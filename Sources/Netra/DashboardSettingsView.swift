@@ -462,6 +462,12 @@ struct DashboardSettingsView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let first = store.snapshot?.daily.first?.date {
+                    Label("Netra keeps its own daily totals (tokens and estimated cost per agent and model) since \(first.formatted(date: .abbreviated, time: .omitted)). They stay when an agent deletes or compresses old sessions, or when you clear them to free space.", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
