@@ -10,11 +10,11 @@ enum IslandTheme {
     static let warning = Color(red: 1.0, green: 0.69, blue: 0.13)
     static let critical = Color(red: 0.90, green: 0.28, blue: 0.30)
     static let fresh = Color(red: 0.19, green: 0.82, blue: 0.35)
-    /// A newer Netra release is out.
-    static let update = Color(red: 0.94, green: 0.54, blue: 0.36)
 
     static let cardRadius: CGFloat = 20
-    static let expandedBottomRadius: CGFloat = 32
+    /// Corner radius of a tile in the open island's grid.
+    static let tileRadius: CGFloat = 14
+    static let expandedBottomRadius: CGFloat = 26
     static let compactBottomRadius: CGFloat = 14
 
     /// One spring for every island morph so all states move alike.
