@@ -21,6 +21,9 @@ struct MenuView: View {
     @State var panelTarget: UsagePanelTarget?
     @State var panelHoverTask: Task<Void, Never>?
     @State private var appliedDefaultPeriod = false
+    /// Providers whose barely-used windows were opened up from their one line.
+    // Internal so the limit cards (LimitsViews.swift) can read and set it.
+    @State var expandedQuietProviders: Set<String> = []
 
     /// Managed Claude Code and Codex accounts; nil hides account controls.
     var accounts: AccountStore? = nil

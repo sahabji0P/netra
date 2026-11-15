@@ -51,9 +51,12 @@ logs (`~/.claude`, `~/.codex`, …), so stats appear once you've run an agent at
 least once on this machine. Click the usage summary or **Open Usage** for the
 full dashboard; **Settings** opens in that same window.
 
-The popover leads with your **subscription limits** — one card per provider
-with each window's bar, how much is used, when it resets, and (optionally) a
-pace line that warns when you'd run out before the reset. Below that is the
+The popover leads with your **subscription limits** — one section per
+provider with one line per window: its bar, how much is used, and when it
+resets. A pace line appears under a window only when it needs attention (the
+limit is reached, or you would run out before the reset). A provider whose
+windows are all under 10% used shows a single line; click it to see each
+one. Below that is the
 period's API-equivalent cost and activity chart, then a single row of actions
 (Keep Awake, dashboard, Settings, refresh, Lock & Sleep, quit).
 
@@ -98,8 +101,8 @@ Codex limits are live: Netra asks the Codex CLI's own app server
 and asks OpenAI directly, so the numbers are current even when no Codex
 session ran recently (session logs go stale across resets, including redeemed
 reset credits). Banked resets — Codex's free "Full reset (Weekly + 5 hr)"
-credits — are shown with their count and next expiry in the popover, and
-each one's expiry on the Subscriptions page. Claude has no banked resets;
+credits — are shown with their count and each one's time to expiry in the
+popover and on the Subscriptions page. Claude has no banked resets;
 its card shows the status of your extra-usage credits instead (on with
 spend vs cap, off, or used up). If
 the CLI isn't installed or doesn't answer, Netra falls back to the newest
@@ -222,8 +225,10 @@ plugins, skills, hooks, projects, and history. Only the sign-in changes.
   `codex login`) inside a private, temporary folder, so the account you are
   using is never signed out. Netra imports the new sign-in as soon as it
   lands and deletes the temporary copy.
-- **Switch:** click the account name beside a provider's plan badge in the
-  popover, or the switch button on a parked account's row. New sessions use
+- **Switch:** click the account's face and name at the right of a provider's
+  header in the popover, then **Switch** beside the account you want (or use
+  the switch button on a parked account's row on the Subscriptions page). The
+  list shows the room each parked account had when last seen. New sessions use
   the new account at once; sessions already running keep the previous one
   until they restart (the popover says how many are running).
 - **See every account:** parked accounts show their 5-hour and weekly limits
