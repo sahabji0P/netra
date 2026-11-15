@@ -3,9 +3,28 @@ import SwiftUI
 
 // MARK: - Cost tile model
 
-/// What the island's cost tile shows: the last two weeks as bars, one day in
-/// focus (today unless a bar was clicked), and how that day compares with the
-/// week before it. Pure, so every number on the tile is testable.
+/// The span the island's cost tile totals.
+enum IslandCostRange: Int, CaseIterable, Identifiable, Sendable {
+    case today = 1, week = 7, month = 30
+
+    var id: Int { rawValue }
+    var title: String {
+        switch self {
+        case .today: "1D"
+        case .week: "7D"
+        case .month: "30D"
+        }
+    }
+
+    /// Bars drawn for the range. Today alone would be one bar, so it shows
+    /// the last two weeks for context.
+    var barCount: Int { self == .today ? 14 : rawValue }
+}
+
+/// What the island's cost tile shows: cost and tokens for a range (today,
+/// the last 7 days, or the last 30) or for one day whose bar was clicked,
+/// how that compares with the period before it, and the days as bars.
+/// Pure, so every number on the tile is testable.
 struct IslandCostModel: Equatable {
     struct Day: Identifiable, Equatable {
         /// The day key (`yyyy-MM-dd`).
@@ -15,44 +34,66 @@ struct IslandCostModel: Equatable {
         var tokens: Int
     }
 
-    static let dayCount = 14
+    /// A single day is compared with the average of this many days before it.
     static let trendDays = 7
 
-    /// The last `dayCount` days, oldest first; days without usage are zeros.
+    var range: IslandCostRange
+    /// The range's days, oldest first; days without usage are zeros.
     var days: [Day]
-    /// The day in focus.
-    var focus: Day
+    /// The day the headline is about, when it is one day: today on the 1D
+    /// range, or the day whose bar was clicked. Nil for a 7- or 30-day total.
+    var focusDay: Day?
     var focusIsToday: Bool
-    /// The focused day's cost against the average of the `trendDays` days
-    /// before it; nil when those days had no usage to compare with.
+    var cost: Double
+    var tokens: Int
+    /// The headline against its baseline: for one day, the average of the
+    /// `trendDays` days before it; for a range, the equal span before it.
+    /// Nil when the baseline had no usage.
     var trend: Double?
+    var trendCaption: String
 
     init(
-        snapshot: UsageSnapshot?, hiddenProviders: Set<String>, selectedDay: String? = nil,
-        now: Date = .now, calendar: Calendar = .current
+        snapshot: UsageSnapshot?, hiddenProviders: Set<String>, range: IslandCostRange = .today,
+        selectedDay: String? = nil, now: Date = .now, calendar: Calendar = .current
     ) {
+        self.range = range
         let keys = PeriodKeys.keyer(calendar)
-        let rows = (snapshot?.daily ?? []).suffix(Self.dayCount + Self.trendDays + 1)
+        // Enough history for the bars plus the baseline of the oldest one.
+        let depth = range.barCount + max(Self.trendDays, range.rawValue)
         let byDay = Dictionary(
-            rows.map { ($0.period, $0.filtered(hidingProviders: hiddenProviders)) },
+            (snapshot?.daily ?? []).suffix(depth + 1).map { ($0.period, $0.filtered(hidingProviders: hiddenProviders)) },
             uniquingKeysWith: { first, _ in first }
         )
         let today = keys.startOfDay(now)
-        func day(_ offset: Int) -> Day {
+        // Offsets back from today: 0 is today.
+        let history = (0..<depth).map { offset -> Day in
             let date = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
             let key = keys.day(date)
             return Day(id: key, date: date, cost: byDay[key]?.cost ?? 0, tokens: byDay[key]?.totalTokens ?? 0)
         }
-        // Offsets back from today: 0 is today.
-        let history = (0..<(Self.dayCount + Self.trendDays)).map(day)
-        days = Array(history.prefix(Self.dayCount).reversed())
+        days = Array(history.prefix(range.barCount).reversed())
 
-        let focusOffset = selectedDay.flatMap { key in history.prefix(Self.dayCount).firstIndex { $0.id == key } } ?? 0
-        focus = history[focusOffset]
-        focusIsToday = focusOffset == 0
-        let before = history[(focusOffset + 1)...].prefix(Self.trendDays)
-        let average = before.isEmpty ? 0 : before.reduce(0) { $0 + $1.cost } / Double(before.count)
-        trend = DashboardUsageAggregator.change(from: average, to: focus.cost)
+        let clicked = selectedDay.flatMap { key in history.prefix(range.barCount).firstIndex { $0.id == key } }
+        if let offset = clicked ?? (range == .today ? 0 : nil) {
+            let day = history[offset]
+            focusDay = day
+            focusIsToday = offset == 0
+            cost = day.cost
+            tokens = day.tokens
+            let before = history[(offset + 1)...].prefix(Self.trendDays)
+            let average = before.isEmpty ? 0 : before.reduce(0) { $0 + $1.cost } / Double(before.count)
+            trend = DashboardUsageAggregator.change(from: average, to: day.cost)
+            trendCaption = "vs \(Self.trendDays)-day avg"
+        } else {
+            let span = history.prefix(range.rawValue)
+            let previous = history.dropFirst(range.rawValue).prefix(range.rawValue)
+            focusDay = nil
+            focusIsToday = false
+            cost = span.reduce(0) { $0 + $1.cost }
+            tokens = span.reduce(0) { $0 + $1.tokens }
+            trend = DashboardUsageAggregator.change(from: previous.reduce(0) { $0 + $1.cost }, to: cost)
+            trendCaption = "vs previous \(range.rawValue) days"
+        }
     }
 }
 
@@ -93,7 +134,8 @@ struct IslandExpandedContent: View {
     var claudeKeychainNeedsApproval = false
     var openDashboard: (DashboardSection) -> Void = { _ in }
 
-    /// The bar the pointer last clicked; nil shows today.
+    @State private var range = IslandCostRange.today
+    /// The bar that was clicked; nil shows the range's own total.
     @State private var selectedDay: String?
 
     static let width: CGFloat = 440
@@ -131,10 +173,10 @@ struct IslandExpandedContent: View {
     private func grid(_ cards: [ProviderLimits], now: Date) -> some View {
         let model = IslandCostModel(
             snapshot: snapshot, hiddenProviders: preferences.hiddenMenuProviders,
-            selectedDay: selectedDay, now: now
+            range: range, selectedDay: selectedDay, now: now
         )
         return HStack(alignment: .top, spacing: Self.gap) {
-            IslandCostTile(model: model, selectedDay: $selectedDay) { openDashboard(.usage) }
+            IslandCostTile(model: model, range: $range, selectedDay: $selectedDay) { openDashboard(.usage) }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             if !cards.isEmpty {
                 LazyVGrid(
@@ -191,29 +233,37 @@ struct IslandExpandedContent: View {
 
 // MARK: - Tiles
 
-/// Cost and tokens for one day, the trend against the week before it, and
-/// the last two weeks as bars. Clicking a bar puts that day in focus;
-/// clicking it again returns to today.
+/// Cost and tokens for today, the last 7 days, or the last 30, with the
+/// trend against the period before and the days as bars. Clicking a bar
+/// shows that day; clicking it again returns to the range's total.
 struct IslandCostTile: View {
     var model: IslandCostModel
+    @Binding var range: IslandCostRange
     @Binding var selectedDay: String?
     var openUsage: () -> Void
 
+    private static let barHeight: CGFloat = 34
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(IslandTheme.secondaryText)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                rangePicker
+            }
             Button(action: openUsage) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(title)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(IslandTheme.secondaryText)
-                    Text(Format.cost(model.focus.cost))
+                    Text(Format.cost(model.cost))
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                    Text("\(Format.tokens(model.focus.tokens)) tokens")
+                    Text("\(Format.tokens(model.tokens)) tokens")
                         .font(.system(size: 10.5))
                         .monospacedDigit()
                         .foregroundStyle(IslandTheme.secondaryText)
@@ -223,51 +273,90 @@ struct IslandCostTile: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .padding(.top, 5)
             .help("Estimated at API list prices, not your subscription bill. Click to open Usage.")
             Spacer(minLength: 10)
             bars
         }
         .padding(12)
         .background(IslandTheme.card, in: RoundedRectangle(cornerRadius: IslandTheme.tileRadius, style: .continuous))
-        .animation(.easeOut(duration: 0.15), value: model.focus.id)
+        .animation(.easeOut(duration: 0.15), value: model.focusDay?.id)
+        .animation(.easeOut(duration: 0.15), value: model.range)
     }
 
     private var title: String {
-        model.focusIsToday
-            ? "TODAY"
-            : model.focus.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)).uppercased()
+        if let day = model.focusDay, !model.focusIsToday {
+            return day.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)).uppercased()
+        }
+        switch model.range {
+        case .today: return "TODAY"
+        case .week: return model.focusDay == nil ? "7 DAYS" : "TODAY"
+        case .month: return model.focusDay == nil ? "30 DAYS" : "TODAY"
+        }
+    }
+
+    private var rangePicker: some View {
+        HStack(spacing: 1) {
+            ForEach(IslandCostRange.allCases) { option in
+                let isOn = option == model.range
+                Button {
+                    range = option
+                    selectedDay = nil
+                } label: {
+                    Text(option.title)
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(isOn ? .black : IslandTheme.secondaryText)
+                        .padding(.horizontal, 6)
+                        .frame(height: 17)
+                        .background(isOn ? Color.white : .clear, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(option == .today ? "Today" : "Last \(option.rawValue) days")
+                .accessibilityAddTraits(isOn ? .isSelected : [])
+            }
+        }
+        .padding(1.5)
+        .background(IslandTheme.track, in: Capsule())
+        // The date title gives way before a range label is cut short.
+        .fixedSize()
     }
 
     @ViewBuilder
     private var trend: some View {
         if let change = model.trend {
             let up = change >= 0
+            let amount = abs(change).formatted(.percent.precision(.fractionLength(0)))
             HStack(spacing: 3) {
                 Image(systemName: up ? "arrow.up.right" : "arrow.down.right")
                     .font(.system(size: 8, weight: .bold))
-                Text("\(abs(change).formatted(.percent.precision(.fractionLength(0)))) vs 7-day avg")
+                Text("\(amount) \(model.trendCaption)")
                     .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(up ? IslandTheme.warning : IslandTheme.fresh)
             .padding(.top, 1)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(up ? "Up" : "Down") \(abs(change).formatted(.percent.precision(.fractionLength(0)))) against the 7-day average")
+            .accessibilityLabel("\(up ? "Up" : "Down") \(amount) \(model.trendCaption)")
         }
     }
 
     private var bars: some View {
         let peak = max(model.days.map(\.cost).max() ?? 0, 0.01)
-        return HStack(alignment: .bottom, spacing: 3) {
+        return HStack(alignment: .bottom, spacing: model.days.count > 14 ? 2 : 3) {
             ForEach(model.days) { day in
-                let isFocus = day.id == model.focus.id
+                let isFocus = day.id == model.focusDay?.id
                 Button {
-                    // Clicking today, or the focused bar again, returns to today.
-                    selectedDay = isFocus || day.id == model.days.last?.id ? nil : day.id
+                    // On 1D today is the resting state, so its bar clears the
+                    // selection too; elsewhere only the focused bar does.
+                    let clears = isFocus || (model.range == .today && day.id == model.days.last?.id)
+                    selectedDay = clears ? nil : day.id
                 } label: {
                     RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                         .fill(isFocus ? Color.white : Color(white: 0.24))
-                        .frame(height: max(2, 34 * day.cost / peak))
-                        .frame(maxWidth: .infinity, maxHeight: 34, alignment: .bottom)
+                        .frame(height: max(2, Self.barHeight * day.cost / peak))
+                        .frame(maxWidth: .infinity, maxHeight: Self.barHeight, alignment: .bottom)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -275,7 +364,7 @@ struct IslandCostTile: View {
                 .accessibilityLabel("\(day.date.formatted(date: .abbreviated, time: .omitted)), \(Format.cost(day.cost))")
             }
         }
-        .frame(height: 34)
+        .frame(height: Self.barHeight)
     }
 }
 

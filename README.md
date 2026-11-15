@@ -190,14 +190,15 @@ drawn to the right of the notch, so your menu-bar items stay clear, and at
 rest the wing lets clicks through to whatever is under it; only the notch
 itself reacts.
 
-Hover over the notch to open the island: one large tile with today's cost and
-tokens, and a small tile per provider with its main limit, a thin bar, and
-the time to its reset. The cost tile also shows how the day compares with the
-average of the seven days before it, and the last two weeks as bars. Click a
-bar to see that day's cost, tokens, and trend; click it again, or today's
-bar, to go back. Clicking the cost opens the Usage page and clicking a
-provider opens Subscriptions, where every window, account, and banked reset
-lives.
+Hover over the notch to open the island: one large tile with cost and tokens,
+and a small tile per provider with its main limit, a thin bar, and the time
+to its reset. The cost tile switches between today (**1D**), the last 7 days,
+and the last 30 days, and shows the days as bars. It also shows the trend:
+today against the average of the seven days before it, or a 7- or 30-day
+total against the equal span before it. Click a bar to see that day's cost,
+tokens, and trend; click it again to go back. Clicking the cost opens the
+Usage page and clicking a provider opens Subscriptions, where every window,
+account, and banked reset lives.
 
 It grows for a few seconds when a limit runs hot (your provider-limit alert
 threshold, 80% by default), is reached (with a live countdown to the reset),

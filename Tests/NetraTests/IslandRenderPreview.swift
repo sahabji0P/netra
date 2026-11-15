@@ -66,6 +66,17 @@ final class IslandRenderPreview: XCTestCase {
             IslandExpandedContent(snapshot: snapshot, state: .fresh, preferences: twoProviders),
             name: "island-expanded-two", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
+        for range in [IslandCostRange.week, .month] {
+            render(
+                IslandCostTile(
+                    model: IslandCostModel(snapshot: snapshot, hiddenProviders: [], range: range, now: now),
+                    range: .constant(range), selectedDay: .constant(nil), openUsage: {}
+                )
+                .frame(width: 202, height: 186)
+                .padding(14),
+                name: "island-cost-\(range.title)", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
+            )
+        }
         twoProviders.setProvider("cursor", visibleInMenu: true)
         twoProviders.setProvider("cursor-grok-bot", visibleInMenu: true)
         render(
@@ -262,14 +273,15 @@ final class IslandDataTests: XCTestCase {
         let snapshot = snapshot(costs: [0: 30, 1: 10, 2: 10, 3: 10, 4: 10, 5: 10, 6: 10, 7: 10, 9: 4], now: now)
         let model = IslandCostModel(snapshot: snapshot, hiddenProviders: [], now: now, calendar: utc)
 
-        XCTAssertEqual(model.days.count, IslandCostModel.dayCount)
+        XCTAssertEqual(model.days.count, IslandCostRange.today.barCount)
         XCTAssertEqual(model.days.first?.id, "2026-09-13")
         XCTAssertEqual(model.days.last?.id, "2026-09-26")
         XCTAssertEqual(model.days.first { $0.id == "2026-09-18" }?.cost, 0, "a day without usage is a zero bar")
         XCTAssertTrue(model.focusIsToday)
-        XCTAssertEqual(model.focus.cost, 30)
-        XCTAssertEqual(model.focus.tokens, 30_000)
+        XCTAssertEqual(model.cost, 30)
+        XCTAssertEqual(model.tokens, 30_000)
         XCTAssertEqual(try XCTUnwrap(model.trend), 2.0, accuracy: 0.000_1, "three times the average is +200%")
+        XCTAssertEqual(model.trendCaption, "vs 7-day avg")
     }
 
     func testClickingABarFocusesThatDayAndComparesItWithItsOwnPriorWeek() {
@@ -282,8 +294,8 @@ final class IslandDataTests: XCTestCase {
             selectedDay: "2026-09-23", now: now, calendar: utc
         )
         XCTAssertFalse(model.focusIsToday)
-        XCTAssertEqual(model.focus.id, "2026-09-23")
-        XCTAssertEqual(model.focus.cost, 5)
+        XCTAssertEqual(model.focusDay?.id, "2026-09-23")
+        XCTAssertEqual(model.cost, 5)
         XCTAssertEqual(try XCTUnwrap(model.trend), -0.5, accuracy: 0.000_1)
 
         // A day outside the two weeks shown falls back to today.
@@ -300,12 +312,43 @@ final class IslandDataTests: XCTestCase {
             snapshot: snapshot(costs: [0: 30, 1: 10], now: now, agent: "codex"),
             hiddenProviders: ["codex"], now: now, calendar: utc
         )
-        XCTAssertEqual(hidden.focus.cost, 0)
+        XCTAssertEqual(hidden.cost, 0)
         XCTAssertNil(hidden.trend)
 
         let firstDay = IslandCostModel(snapshot: snapshot(costs: [0: 30], now: now), hiddenProviders: [], now: now, calendar: utc)
         XCTAssertNil(firstDay.trend, "nothing to compare a first day with")
-        XCTAssertEqual(IslandCostModel(snapshot: nil, hiddenProviders: [], now: now, calendar: utc).focus.cost, 0)
+        XCTAssertEqual(IslandCostModel(snapshot: nil, hiddenProviders: [], now: now, calendar: utc).cost, 0)
+    }
+
+    func testSevenAndThirtyDayRangesTotalTheSpanAndCompareWithTheOneBefore() {
+        let now = ISODate.parse("2026-09-26T12:00:00Z")!
+        // Last 7 days: $10 a day. The 7 before: $5 a day. Older: $1 a day.
+        var costs: [Int: Double] = [:]
+        for offset in 0..<7 { costs[offset] = 10 }
+        for offset in 7..<14 { costs[offset] = 5 }
+        for offset in 14..<60 { costs[offset] = 1 }
+        let snapshot = snapshot(costs: costs, now: now)
+
+        let week = IslandCostModel(snapshot: snapshot, hiddenProviders: [], range: .week, now: now, calendar: utc)
+        XCTAssertEqual(week.days.count, 7)
+        XCTAssertNil(week.focusDay)
+        XCTAssertEqual(week.cost, 70, accuracy: 0.000_1)
+        XCTAssertEqual(week.tokens, 70_000)
+        XCTAssertEqual(try XCTUnwrap(week.trend), 1.0, accuracy: 0.000_1, "$70 against $35")
+        XCTAssertEqual(week.trendCaption, "vs previous 7 days")
+
+        let month = IslandCostModel(snapshot: snapshot, hiddenProviders: [], range: .month, now: now, calendar: utc)
+        XCTAssertEqual(month.days.count, 30)
+        XCTAssertEqual(month.cost, 70 + 35 + 16, accuracy: 0.000_1)
+        XCTAssertEqual(try XCTUnwrap(month.trend), (121.0 - 30) / 30, accuracy: 0.000_1, "the 30 days before cost $30")
+
+        // A clicked bar inside a range shows that day, not the total.
+        let clicked = IslandCostModel(
+            snapshot: snapshot, hiddenProviders: [], range: .month, selectedDay: "2026-09-16", now: now, calendar: utc
+        )
+        XCTAssertEqual(clicked.focusDay?.id, "2026-09-16")
+        XCTAssertEqual(clicked.cost, 5)
+        XCTAssertEqual(clicked.trendCaption, "vs 7-day avg")
     }
 
     func testLimitCardsRespectVisibilityAndTodayHidesHiddenProviders() {
