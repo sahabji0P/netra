@@ -59,12 +59,16 @@ actor CCUsageClient {
     }
 
     /// The active 5-hour billing block; 60 days of history give the
-    /// "usual peak" that --token-limit max measures against.
+    /// "usual peak" that --token-limit max measures against. The block
+    /// report loads every Claude Code log whatever window it is given;
+    /// loading them on one thread gives the same result in about half the
+    /// memory.
     func fetchActiveBlock() async throws -> BlockStat? {
         let data = try await runJSON([
             "blocks",
             "--json",
             "--offline",
+            "--single-thread",
             "--token-limit", "max",
             "--since", sinceArgument(daysBack: 60),
         ], timeout: 20)

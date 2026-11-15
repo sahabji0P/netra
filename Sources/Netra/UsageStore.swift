@@ -57,6 +57,10 @@ final class UsageStore {
     /// three calls every minute invites throttling, so reuse a recent result.
     private let cursorQuotaMaxAge: TimeInterval = 5 * 60
     private let liveQuotaMaxAge: TimeInterval = 5 * 60
+    /// The 5-hour block estimate reads every Claude Code log, so, like the
+    /// other secondary readers, one reading serves a few minutes.
+    private let blockMaxAge: TimeInterval = 5 * 60
+    private var blockFetchedAt: Date?
     private var codexLiveAttemptedAt: Date?
     private let cursorEventStore = CursorEventStore()
     private let ledger: UsageLedger
@@ -150,11 +154,14 @@ final class UsageStore {
                 }.value
                 let codexKey = live.codex?.key, claudeKey = live.claude?.key
                 noteIdentities(claude: claudeKey, codex: codexKey)
-                let block: BlockStat?
-                do {
-                    block = try await client.fetchActiveBlock()
-                } catch {
-                    block = previousSnapshot?.activeBlock
+                var block = previousSnapshot?.activeBlock
+                if blockFetchedAt.map({ Date.now.timeIntervalSince($0) >= blockMaxAge }) ?? true {
+                    do {
+                        block = try await client.fetchActiveBlock()
+                        blockFetchedAt = .now
+                    } catch {
+                        // Keep the last observed block and try again next refresh.
+                    }
                 }
                 // Codex limits, best source first: the CLI's app server (live
                 // from OpenAI, reused for a few minutes), then the newest

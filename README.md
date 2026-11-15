@@ -117,7 +117,7 @@ macOS asks only when you turn it on or click **Allow Keychain access** (choose
 password dialog. The token is kept in memory only and is only ever sent to
 api.anthropic.com. Only when neither source is available does Claude fall
 back to a clearly-labelled local estimate (current 5-hour block versus your
-own heaviest recent block).
+own heaviest recent block, re-read every five minutes).
 
 Settings also controls the menu-bar label, which sections appear in the
 popover, and optional daily-token or usage-indicator alerts. macOS
@@ -146,8 +146,9 @@ nothing else, in `~/Library/Application Support/Netra/usage-history.json`.
   recorded means logs were removed, not that less was used.
 - For usage totals, a refresh reads only the last three days of logs. Netra
   reads everything the agents still have on the first run, after a ccusage
-  upgrade, when a missing price is filled in, and once a day. (The local
-  5-hour block estimate still reads 60 days of Claude Code logs each time.)
+  upgrade, when a missing price is filled in, and once a day. The local
+  5-hour block estimate reads 60 days of Claude Code logs, at most every
+  five minutes.
 - History starts when Netra first reads a day. Usage whose logs were already
   deleted before that cannot be recovered. To make Claude Code keep its
   transcripts longer in the meantime, set `cleanupPeriodDays` in
