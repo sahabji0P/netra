@@ -14,14 +14,17 @@ final class AccountsRenderPreview: XCTestCase {
         }
         try FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
-        let suiteName = "NetraTests.AccountsRender.\(UUID().uuidString)"
+        let suiteName = "NetraTests.AccountsRender"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferences(defaults: defaults)
         let store = UsageStore(
             preferences: preferences,
             alerts: UsageAlertController(scheduler: AccountsInertScheduler(), persistence: AccountsInertPersistence()),
             feedFile: UsageFeedFile(url: URL(fileURLWithPath: outputDir).appendingPathComponent("accounts-feed.json")),
+            ledger: UsageLedger(fileURL: URL(fileURLWithPath: outputDir)
+                .appendingPathComponent("accounts-history-\(UUID().uuidString).json")),
             publisher: UsagePublisher(defaults: UserDefaults(suiteName: suiteName)!, version: "render", tokenProvider: { _ in nil }),
             startsAutomatically: false
         )

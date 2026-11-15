@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Lenient readers for untyped JSON from undocumented provider APIs, which
 /// send the same field as a number in one response and a string in another.
@@ -74,17 +75,66 @@ enum PeriodKeys {
     }
 
     static func day(_ date: Date, _ base: Calendar = .current) -> String {
-        formatter("yyyy-MM-dd", base).string(from: date)
+        keyer(base).day(date)
     }
 
-    static func month(_ date: Date, _ base: Calendar = .current) -> String {
-        formatter("yyyy-MM", base).string(from: date)
+    /// The keys for `base`'s time zone. Building formatters costs far more
+    /// than using them, and views ask for the current period on every
+    /// render, so the last `Keyer` is kept and reused until the time zone
+    /// changes.
+    static func keyer(_ base: Calendar = .current) -> Keyer {
+        cached.withLock { cached in
+            if let cached, cached.timeZone == base.timeZone { return cached }
+            let keyer = Keyer(timeZone: base.timeZone)
+            cached = keyer
+            return keyer
+        }
     }
 
-    /// The Monday that starts `date`'s week, as a day key and a date.
-    static func weekStart(_ date: Date, _ base: Calendar = .current) -> (key: String, date: Date) {
-        let calendar = weeks(base)
-        let start = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
-        return (day(start, base), start)
+    private static let cached = OSAllocatedUnfairLock<Keyer?>(initialState: nil)
+
+    /// Day, week and month keys in one time zone. Its formatters and
+    /// calendars are never changed after `init`, and formatting with a
+    /// `DateFormatter` is thread-safe, so one instance is shared freely.
+    struct Keyer: @unchecked Sendable {
+        let timeZone: TimeZone
+        private let gregorian: Calendar
+        private let weeks: Calendar
+        private let dayFormatter: DateFormatter
+        private let monthFormatter: DateFormatter
+
+        fileprivate init(timeZone: TimeZone) {
+            var base = Calendar(identifier: .gregorian)
+            base.timeZone = timeZone
+            self.timeZone = timeZone
+            gregorian = PeriodKeys.gregorian(base)
+            weeks = PeriodKeys.weeks(base)
+            dayFormatter = PeriodKeys.formatter("yyyy-MM-dd", base)
+            monthFormatter = PeriodKeys.formatter("yyyy-MM", base)
+        }
+
+        func day(_ date: Date) -> String {
+            dayFormatter.string(from: date)
+        }
+
+        func startOfDay(_ date: Date) -> Date {
+            gregorian.startOfDay(for: date)
+        }
+
+        /// The local midnight a day key names; nil for anything else.
+        func date(fromDay key: String) -> Date? {
+            dayFormatter.date(from: key)
+        }
+
+        /// The Monday that starts `date`'s week, as a day key and a date.
+        func week(_ date: Date) -> (key: String, date: Date) {
+            let start = weeks.dateInterval(of: .weekOfYear, for: date)?.start ?? weeks.startOfDay(for: date)
+            return (dayFormatter.string(from: start), start)
+        }
+
+        func month(_ date: Date) -> (key: String, date: Date) {
+            let start = gregorian.dateInterval(of: .month, for: date)?.start ?? gregorian.startOfDay(for: date)
+            return (monthFormatter.string(from: date), start)
+        }
     }
 }

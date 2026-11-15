@@ -101,8 +101,9 @@ final class ResetCelebrationTests: XCTestCase {
     }
 
     func testStorePersistsAcknowledgedBoundaries() {
-        let suite = "NetraTests.Celebration.\(UUID().uuidString)"
+        let suite = "NetraTests.Celebration"
         let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
 
         XCTAssertTrue(ResetCelebrationStore(defaults: defaults).acknowledged().isEmpty)

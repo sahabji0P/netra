@@ -16,8 +16,9 @@ final class RenderPreviewHarness: XCTestCase {
             atPath: outputDir, withIntermediateDirectories: true
         )
 
-        let suiteName = "NetraTests.RenderPreview.\(UUID().uuidString)"
+        let suiteName = "NetraTests.RenderPreview"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferences(defaults: defaults)
         // Exercise the opt-in provider surfaces in the render.
@@ -30,6 +31,9 @@ final class RenderPreviewHarness: XCTestCase {
                 persistence: RenderInertPersistence()
             ),
             feedFile: UsageFeedFile(url: URL(fileURLWithPath: outputDir).appendingPathComponent("usage-feed.json")),
+            // Start from an empty history each run, and leave Netra's own untouched.
+            ledger: UsageLedger(fileURL: URL(fileURLWithPath: outputDir)
+                .appendingPathComponent("usage-history-\(UUID().uuidString).json")),
             publisher: UsagePublisher(defaults: UserDefaults(suiteName: suiteName)!, version: "render", tokenProvider: { _ in nil }),
             startsAutomatically: false
         )
@@ -76,7 +80,7 @@ final class RenderPreviewHarness: XCTestCase {
         for section in [DashboardSection.menuBar, .limits, .providers, .general] {
             render(
                 DashboardSettingsView(section: section, preferences: preferences, store: store)
-                    .frame(width: 860, height: 1000),
+                    .frame(width: 860, height: 1500),
                 name: "settings-\(section.rawValue)", outputDir: outputDir
             )
         }

@@ -27,6 +27,11 @@ instructions.
   the pinned `ccusage-bin` sidecar. It is the primary usage-data boundary.
 - `Sources/Netra/Models.swift` contains external ccusage DTOs and the normalized,
   persisted domain models consumed by the UI.
+- `Sources/Netra/UsageLedger.swift` is the recorded usage history: per-day,
+  per-agent totals in `usage-history.json` that outlive the agents' session
+  logs. `UsageHistory` holds the rule for what a new reading may change,
+  `UsageScan` decides whether a refresh reads all logs or only recent days,
+  and the `UsageLedger` actor persists it. Every snapshot is built from it.
 - `ClaudeQuotaFetcher.swift`, `ClaudeCachedQuotaReader.swift`,
   `CodexQuotaReader.swift`, `CursorUsageFetcher.swift`,
   `CursorUsageEvents.swift`, and `PricingOverrides.swift` adapt secondary or
@@ -53,7 +58,8 @@ instructions.
   external formats. `fixtures/` at the root contains exploratory captures and
   benchmark notes rather than test resources.
 - `run.sh` builds, signs, and restarts a development build. `scripts/` assembles
-  and publishes the distributable app. `packaging/` contains shipped assets.
+  and publishes the distributable app, and holds the ccusage version check
+  and the git hook that runs it. `packaging/` contains shipped assets.
 
 ## Architecture and implementation rules
 
@@ -68,6 +74,11 @@ instructions.
 - A failed refresh must never overwrite the last successful snapshot. Preserve
   freshness provenance (`fetchedAt`, observed timestamps, and stale UI labels)
   across fallbacks.
+- The usage history is the only copy of usage whose logs are gone. A reading
+  may raise or reprice a recorded day, never lower it or drop it; an
+  unreadable history file is set aside, never overwritten. Days, weeks, and
+  months shown anywhere are sums of the recorded days, not ccusage's own
+  weekly or monthly sections, so a recent-days scan cannot shrink them.
 - Keep transport DTOs separate from normalized UI/persistence models. When an
   external JSON or JSONL shape changes, update the adapter and add or update a
   captured fixture plus a contract test.
@@ -134,6 +145,11 @@ instructions.
 5. Run validation proportional to the change and report exactly what ran and
    what could not be verified.
 
+Tests that need `UserDefaults` use a fixed suite name (`NetraTests.<Name>`),
+cleared before and after use. A unique name per run leaves an empty plist in
+`~/Library/Preferences` every time, because clearing a suite does not delete
+its file.
+
 Do not tag, release, push, modify the Homebrew tap, or commit changes unless the
 user explicitly asks for that action. The release scripts mutate external state
 and are not ordinary validation commands.
@@ -146,8 +162,11 @@ Run commands from the repository root.
 - `swift test` — run the full XCTest suite; required for source or test changes.
 - `swift test --filter ContractTests` — focused external-contract tests.
 - `swift test --filter PricingOverridesTests` — focused pricing tests.
-- `zsh -n run.sh scripts/build-app.sh scripts/release.sh` — syntax-check shell
+- `zsh -n run.sh scripts/*.sh scripts/git-hooks/pre-push` — syntax-check shell
   scripts after editing them.
+- `scripts/check-ccusage.sh` — fail when `ccusage-bin` is behind the latest
+  ccusage on npm. The `pre-push` hook (`git config core.hooksPath
+  scripts/git-hooks`) runs it for pushes to `master`; `release.sh` runs it too.
 - `git diff --check` — check every change for whitespace errors.
 - `NETRA_RENDER_DIR=/tmp/netra-previews swift test --filter AccountsRenderPreview`
   — render the account switcher (popover, Accounts page, Subscriptions) with

@@ -1,0 +1,10 @@
+#!/bin/zsh
+# Runs before `git push`. Pushing master is how changes reach the main
+# branch, so that is where the pinned ccusage must be current.
+# Enable once per clone:  git config core.hooksPath scripts/git-hooks
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [[ "$remote_ref" == "refs/heads/master" ]]; then
+    exec "$(git rev-parse --show-toplevel)/scripts/check-ccusage.sh" </dev/null
+  fi
+done
+exit 0

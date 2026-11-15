@@ -91,10 +91,10 @@ final class CursorUsageEventsTests: XCTestCase {
 
     func testDailyBucketsCarryApiRateCost() throws {
         let page = try XCTUnwrap(CursorUsageEvents.page(from: fixture("cursor-filtered-usage-events.json")))
-        let daily = CursorUsageEvents.agentStats(from: page.events, granularity: .day, calendar: utc)
-        XCTAssertEqual(daily.map(\.period), ["2026-09-24", "2026-09-25"])
-        let day = try XCTUnwrap(daily.last?.agent)
-        XCTAssertEqual(day.name, "cursor")
+        let daily = CursorUsageEvents.dailyStats(from: page.events, calendar: utc)
+        XCTAssertEqual(daily.map(\.day), ["2026-09-24", "2026-09-25"])
+        XCTAssertEqual(daily.last?.agents.map(\.name), ["cursor"])
+        let day = try XCTUnwrap(daily.last?.agents.first)
         XCTAssertEqual(day.totalTokens, 170 + 1230)
         XCTAssertEqual(day.cost, 0.06, accuracy: 0.000_001)
         XCTAssertEqual(day.models.map(\.name), ["composer-2.5", "default"])
@@ -105,12 +105,15 @@ final class CursorUsageEventsTests: XCTestCase {
     /// allowance), so it is its own provider line rather than inflating Cursor.
     func testGrokBotEventsFormTheirOwnProviderLine() throws {
         let page = try XCTUnwrap(CursorUsageEvents.page(from: fixture("cursor-filtered-usage-events.json")))
-        let daily = CursorUsageEvents.agentStats(from: page.events, granularity: .day, calendar: utc)
-        let grok = try XCTUnwrap(daily.first { $0.agent.name == CursorUsageEvents.grokBotAgent })
-        XCTAssertEqual(grok.period, "2026-09-24")
-        XCTAssertEqual(grok.agent.models.map(\.name), ["grok-bot-automation"])
-        XCTAssertEqual(grok.agent.cost, 0.005, accuracy: 0.000_001)
-        XCTAssertFalse(daily.contains { $0.agent.name == "cursor" && $0.agent.models.contains { $0.name.hasPrefix("grok-bot") } })
+        let daily = CursorUsageEvents.dailyStats(from: page.events, calendar: utc)
+        let grokDay = try XCTUnwrap(daily.first { $0.agents.contains { $0.name == CursorUsageEvents.grokBotAgent } })
+        XCTAssertEqual(grokDay.day, "2026-09-24")
+        let grok = try XCTUnwrap(grokDay.agents.first { $0.name == CursorUsageEvents.grokBotAgent })
+        XCTAssertEqual(grok.models.map(\.name), ["grok-bot-automation"])
+        XCTAssertEqual(grok.cost, 0.005, accuracy: 0.000_001)
+        XCTAssertFalse(daily.flatMap(\.agents).contains {
+            $0.name == "cursor" && $0.models.contains { $0.name.hasPrefix("grok-bot") }
+        })
 
         // Both lines still land in the same period row, and the row total covers both.
         let events = [
@@ -157,9 +160,10 @@ final class CursorUsageEventsTests: XCTestCase {
         XCTAssertEqual(snapshot.daily.map(\.period), ["2026-09-24", "2026-09-25"])
     }
 
-    /// ccusage keys weeks by Monday regardless of locale. A Sunday-first
-    /// calendar (e.g. en_IN) must not open a separate Cursor-only week.
-    func testWeeklyBucketsUseMondayWeeksLikeCcusage() throws {
+    /// Weeks are keyed by Monday regardless of locale. A Sunday-first
+    /// calendar (e.g. en_IN) must not put Cursor's Sunday into the next week
+    /// or open a week of its own beside another agent's.
+    func testWeeksAreMondayKeyedAndSharedAcrossAgents() throws {
         var sundayFirst = utc
         sundayFirst.firstWeekday = 1
         let events = [
@@ -167,13 +171,8 @@ final class CursorUsageEventsTests: XCTestCase {
             Self.event("2026-09-21T12:00:00Z", input: 20),
             Self.event("2026-09-27T12:00:00Z", input: 40),
         ]
-        let weekly = CursorUsageEvents.agentStats(from: events, granularity: .week, calendar: sundayFirst)
-        XCTAssertEqual(weekly.map(\.period), ["2026-09-14", "2026-09-21"])
-        XCTAssertEqual(weekly.map(\.agent.totalTokens), [10, 60])
-
         let report = CCUnifiedReport(
-            daily: [],
-            weekly: [CCRow(
+            daily: [CCRow(
                 period: "2026-09-21", inputTokens: 5, outputTokens: 0,
                 cacheCreationTokens: 0, cacheReadTokens: 0, totalTokens: 5, totalCost: 1,
                 agents: [CCAgentRow(
@@ -183,15 +182,16 @@ final class CursorUsageEventsTests: XCTestCase {
                 )],
                 modelBreakdowns: []
             )],
-            monthly: []
+            weekly: [], monthly: []
         )
         let snapshot = UsageSnapshot(
             fetchedAt: .now, report: report, activeBlock: nil, codexQuota: nil, claudeQuota: nil,
             cursorEvents: events, calendar: sundayFirst
         )
+        XCTAssertEqual(snapshot.weekly.map(\.period), ["2026-09-14", "2026-09-21"])
+        XCTAssertEqual(snapshot.weekly.map(\.totalTokens), [10, 65])
         let current = try XCTUnwrap(snapshot.weekly.last)
-        XCTAssertEqual(current.period, "2026-09-21")
-        XCTAssertEqual(current.totalTokens, 65)
+        XCTAssertEqual(current.agentStat("cursor")?.totalTokens, 60)
         XCTAssertEqual(Set(current.agents.map(\.name)), ["claude", "cursor"])
     }
 
