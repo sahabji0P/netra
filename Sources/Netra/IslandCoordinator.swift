@@ -11,7 +11,6 @@ final class IslandCoordinator {
     private let preferences: AppPreferences
     private let accounts: AccountStore
     private let awake: AwakeController
-    private let updates: UpdateChecker?
     private let dashboardNavigation: DashboardNavigation
     private let queue = IslandActivityQueue()
     private var watcher = IslandLimitWatcher()
@@ -26,10 +25,8 @@ final class IslandCoordinator {
         preferences: AppPreferences,
         accounts: AccountStore,
         awake: AwakeController,
-        updates: UpdateChecker? = nil,
         dashboardNavigation: DashboardNavigation
     ) {
-        self.updates = updates
         self.store = store
         self.preferences = preferences
         self.accounts = accounts
@@ -77,17 +74,14 @@ final class IslandCoordinator {
     }
 
     private func makeController() -> IslandController {
-        let store = store, preferences = preferences, accounts = accounts, awake = awake, updates = updates
+        let store = store, preferences = preferences
         let controller = IslandController {
-            IslandCompactHost(store: store, preferences: preferences, awake: awake)
+            IslandCompactHost(store: store, preferences: preferences)
         } expanded: { [weak self] in
             IslandExpandedHost(
                 content: IslandExpandedView(
                     store: store,
                     preferences: preferences,
-                    accounts: accounts,
-                    awake: awake,
-                    updates: updates,
                     openDashboard: { self?.openDashboard($0) }
                 ),
                 onHeight: { self?.expandedContentHeight($0) }
@@ -183,12 +177,11 @@ final class IslandCoordinator {
 private struct IslandCompactHost: View {
     var store: UsageStore
     var preferences: AppPreferences
-    var awake: AwakeController
     @Environment(\.islandMetrics) private var metrics
 
     var body: some View {
         IslandCompactView(
-            store: store, preferences: preferences, awake: awake,
+            store: store, preferences: preferences,
             notchGap: metrics.hasNotch ? metrics.notchWidth : 16
         )
     }

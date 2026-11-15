@@ -32,7 +32,7 @@ final class NotchGeometryTests: XCTestCase {
         let resting = NotchGeometry.islandFrame(.resting, layout: layout, sizes: sizes)
         XCTAssertEqual(resting.midX, -960)
         XCTAssertEqual(resting.maxY, 1080)
-        XCTAssertEqual(resting.size, CGSize(width: 2 * sizes.wingWidth, height: 24))
+        XCTAssertEqual(resting.size, CGSize(width: sizes.wingWidth, height: 24))
     }
 
     func testAutoHiddenMenuBarUsesFallbackHeight() {
@@ -59,7 +59,7 @@ final class NotchGeometryTests: XCTestCase {
         XCTAssertNil(NotchGeometry.preferredScreenIndex([]))
     }
 
-    func testModeFramesShareTopAndCenterAndNest() {
+    func testModeFramesShareTopAndNest() {
         for screen in [notched, external] {
             let layout = NotchGeometry.layout(for: screen)
             let panel = NotchGeometry.panelFrame(layout: layout, sizes: sizes)
@@ -68,7 +68,6 @@ final class NotchGeometryTests: XCTestCase {
             }
             for frame in frames {
                 XCTAssertEqual(frame.maxY, screen.frame.maxY)
-                XCTAssertEqual(frame.midX, layout.notch.midX, accuracy: 0.001)
                 XCTAssertTrue(panel.contains(frame), "\(frame) outside panel \(panel)")
                 XCTAssertTrue(frame.contains(layout.notch) || layout.notch.width == 0)
             }
@@ -77,32 +76,38 @@ final class NotchGeometryTests: XCTestCase {
             XCTAssertTrue(peek.contains(resting))
             XCTAssertTrue(expanded.contains(peek))
             XCTAssertTrue(activity.contains(resting))
+            // Open, or showing an activity, the island is centered on the notch.
+            XCTAssertEqual(expanded.midX, layout.notch.midX, accuracy: 0.001)
+            XCTAssertEqual(activity.midX, layout.notch.midX, accuracy: 0.001)
             XCTAssertEqual(activity.height, layout.notch.height + sizes.activity.height)
         }
     }
 
-    func testRestingWingsSitBesideTheNotch() {
+    /// At rest the island is the notch plus one wing on its left; nothing is
+    /// drawn to the right of the notch, where menu-bar items live.
+    func testRestingWingSitsOnTheLeftOfTheNotchOnly() {
         let layout = NotchGeometry.layout(for: notched)
         let resting = NotchGeometry.islandFrame(.resting, layout: layout, sizes: sizes)
-        XCTAssertEqual(resting, CGRect(x: 662 - sizes.wingWidth, y: 950, width: 188 + 2 * sizes.wingWidth, height: 32))
+        XCTAssertEqual(resting, CGRect(x: 662 - sizes.wingWidth, y: 950, width: 188 + sizes.wingWidth, height: 32))
+        XCTAssertEqual(resting.maxX, layout.notch.maxX)
     }
 
-    func testPeekGrowsTheWingsSlightly() {
+    func testPeekGrowsTheWingSlightlyAndStaysLeftOfTheNotch() {
         let layout = NotchGeometry.layout(for: notched)
         let peek = NotchGeometry.islandFrame(.peek, layout: layout, sizes: sizes)
-        XCTAssertEqual(peek.width, 188 + 2 * (sizes.wingWidth + sizes.peekWingGrowth))
-        XCTAssertEqual(peek.midX, layout.notch.midX, accuracy: 0.001)
+        XCTAssertEqual(peek.width, 188 + sizes.wingWidth + sizes.peekWingGrowth)
+        XCTAssertEqual(peek.maxX, layout.notch.maxX)
     }
 
     func testNarrowScreenClampsInsideMargins() {
         let narrow = ScreenDescriptor(
-            frame: CGRect(x: 100, y: 0, width: 500, height: 400),
+            frame: CGRect(x: 100, y: 0, width: 400, height: 200),
             safeAreaTop: 0,
             menuBarHeight: 24
         )
         let layout = NotchGeometry.layout(for: narrow)
         let expanded = NotchGeometry.islandFrame(.expanded, layout: layout, sizes: sizes)
-        XCTAssertEqual(expanded, CGRect(x: 108, y: 0, width: 484, height: 400))
+        XCTAssertEqual(expanded, CGRect(x: 108, y: 0, width: 384, height: 200))
         XCTAssertEqual(NotchGeometry.panelFrame(layout: layout, sizes: sizes), expanded)
     }
 
@@ -126,7 +131,7 @@ final class NotchGeometryTests: XCTestCase {
         let resting = NotchGeometry.islandFrame(.resting, layout: layout, sizes: sizes)
         let local = NotchGeometry.islandRectInPanel(resting, panel: panel)
         XCTAssertEqual(local.minY, 0)
-        XCTAssertEqual(local.midX, panel.width / 2, accuracy: 0.001)
+        XCTAssertEqual(local.minX, resting.minX - panel.minX, accuracy: 0.001)
         XCTAssertEqual(local.size, resting.size)
     }
 

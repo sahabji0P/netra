@@ -183,28 +183,26 @@ nothing else, in `~/Library/Application Support/Netra/usage-history.json`.
 
 ## Notch island
 
-On a MacBook with a camera notch, Netra also lives around the notch. It is
-always visible as two narrow wings beside the notch that rotate through Claude
-Code, Codex, and Cursor every few seconds: the provider's logo and how much of
-its main limit is left on the left, today's total spend over that limit's
-reset countdown on the right. The wings can cover the menu-bar icons right
-next to the notch, but at rest they let clicks through to whatever is under
-them; only the notch itself reacts. Hover over the notch to open a card
-per provider: rings with an elapsed-time tick, the reset countdown, the weekly limit and its
-reset, the provider's spend today, banked resets with the next expiry (tap
-for every credit), and the live account (tap it to switch to another saved
-one). Below the cards sit today's total with a 30-day strip, a version pill
-(it turns orange and opens the release page when a newer Netra is out), and
-buttons for Keep Awake and the dashboard. Choose what the open island shows
-(including every limit window, pace, all saved accounts, and detailed stats)
-in Settings → Notch island. Detailed stats switch between Today, 7D, 30D, and
-90D; click any day in the activity strip to see that day's cost and tokens
-per model, and click it again (or ✕) to go back.
+On a MacBook with a camera notch, Netra also lives beside the notch. At rest
+it is one narrow wing on the left of the notch showing the provider closest
+to its limit: its logo and how much of its main limit is used. Nothing is
+drawn to the right of the notch, so your menu-bar items stay clear, and at
+rest the wing lets clicks through to whatever is under it; only the notch
+itself reacts.
+
+Hover over the notch to open the island: one large tile with today's cost and
+tokens, and a small tile per provider with its main limit, a thin bar, and
+the time to its reset. The cost tile also shows how the day compares with the
+average of the seven days before it, and the last two weeks as bars. Click a
+bar to see that day's cost, tokens, and trend; click it again, or today's
+bar, to go back. Clicking the cost opens the Usage page and clicking a
+provider opens Subscriptions, where every window, account, and banked reset
+lives.
 
 It grows for a few seconds when a limit runs hot (your provider-limit alert
 threshold, 80% by default), is reached (with a live countdown to the reset),
 or resets, and when you switch accounts or toggle Keep Awake. Screens without
-a notch get the same wings as a pill at the top center; the pill hides while
+a notch get the same wing as a pill at the top center; the pill hides while
 the menu bar is hidden (auto-hide or a fullscreen app). The menu-bar icon
 stays either way, and the island can be turned off in Settings. Claude Code,
 Cursor, GitHub Copilot, and OpenCode show their official marks; Codex shows
