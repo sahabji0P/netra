@@ -16,8 +16,9 @@ final class IslandStatsRenderPreview: XCTestCase {
         }
         try FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
-        let suiteName = "NetraTests.IslandStatsRender.\(UUID().uuidString)"
+        let suiteName = "NetraTests.IslandStatsRender"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferences(defaults: defaults)
 

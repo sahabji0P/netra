@@ -145,6 +145,11 @@ instructions.
 5. Run validation proportional to the change and report exactly what ran and
    what could not be verified.
 
+Tests that need `UserDefaults` use a fixed suite name (`NetraTests.<Name>`),
+cleared before and after use. A unique name per run leaves an empty plist in
+`~/Library/Preferences` every time, because clearing a suite does not delete
+its file.
+
 Do not tag, release, push, modify the Homebrew tap, or commit changes unless the
 user explicitly asks for that action. The release scripts mutate external state
 and are not ordinary validation commands.

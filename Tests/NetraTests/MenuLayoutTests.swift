@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class MenuLayoutTests: XCTestCase {
     func testPopoverRootHasUsableIntrinsicSize() {
-        let suiteName = "NetraTests.MenuLayout.\(UUID().uuidString)"
+        let suiteName = "NetraTests.MenuLayout"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }

@@ -68,8 +68,9 @@ final class ProviderVisibilityTests: XCTestCase {
 
     @MainActor
     func testHiddenProvidersPersistAcrossPreferenceInstances() {
-        let suiteName = "NetraTests.ProviderVisibility.\(UUID().uuidString)"
+        let suiteName = "NetraTests.ProviderVisibility"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let preferences = AppPreferences(defaults: defaults)

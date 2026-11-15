@@ -124,8 +124,9 @@ final class LimitSummaryTests: XCTestCase {
 
     @MainActor
     func testPersonalizationPreferencesPersist() {
-        let suite = "NetraTests.LimitPrefs.\(UUID().uuidString)"
+        let suite = "NetraTests.LimitPrefs"
         let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = AppPreferences(defaults: defaults)
         XCTAssertEqual(preferences.orderedLimitProviders, ["claude", "codex", "cursor", "cursor-grok-bot"])
