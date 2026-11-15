@@ -39,6 +39,8 @@ INSTALL_URL="https://raw.githubusercontent.com/$REPO/master/install.sh"
 
 tmp_dir=""
 staging=""
+target=""
+old=""
 
 if [ -t 1 ]; then
     bold=$(printf '\033[1m')
@@ -57,6 +59,11 @@ die() {
 }
 
 cleanup() {
+    # Stopped between the two renames of the swap: put the previous copy back
+    # rather than leave no Netra.app at all.
+    if [ -n "$old" ] && [ -e "$old" ] && [ -n "$target" ] && [ ! -e "$target" ]; then
+        mv "$old" "$target" 2>/dev/null || true
+    fi
     if [ -n "$staging" ] && [ -e "$staging" ]; then rm -rf "$staging"; fi
     if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then rm -rf "$tmp_dir"; fi
 }
@@ -68,7 +75,9 @@ Usage: install.sh [--uninstall [--purge]]
   (no option)   install or update Netra
   --uninstall   quit Netra and remove Netra.app
   --purge       with --uninstall, also delete Netra's settings, caches, and
-                ~/Library/Application Support/Netra
+                ~/Library/Application Support/Netra. That folder holds your
+                recorded usage history, which can't be rebuilt for days whose
+                agent logs are already gone.
 
 See the comments at the top of this script for environment overrides.
 EOF
@@ -103,12 +112,18 @@ plist_value() { # <bundle> <key>
     /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null || true
 }
 
+# Nothing below pipes into a reader that stops early (`grep -q`, `head`,
+# `sed q`): with pipefail that can fail the pipeline and turn "found it" into
+# "not found".
 has_quarantine() {
-    xattr -r "$1" 2>/dev/null | grep -q 'com\.apple\.quarantine'
+    case $(xattr -r "$1" 2>/dev/null) in
+        *com.apple.quarantine*) return 0 ;;
+    esac
+    return 1
 }
 
 signer() {
-    authority=$(codesign -dvv "$1" 2>&1 | sed -n 's/^Authority=//p' | head -n 1)
+    authority=$(codesign -dvv "$1" 2>&1 | awk '/^Authority=/ && !seen++ { sub(/^Authority=/, ""); print }')
     if [ -n "$authority" ]; then printf '%s' "$authority"; else printf 'ad-hoc'; fi
 }
 
@@ -329,7 +344,7 @@ uninstall_netra() {
             "$HOME/Library/Caches/$BUNDLE_ID" \
             "$HOME/Library/HTTPStorages/$BUNDLE_ID"
         defaults delete "$BUNDLE_ID" >/dev/null 2>&1 || true
-        info "Deleted Netra's settings, caches, and ~/Library/Application Support/Netra"
+        info "Deleted Netra's settings, caches, and ~/Library/Application Support/Netra (including usage history)"
     else
         printf '\nNetra'"'"'s settings and data are kept. To delete them too, run:\n'
         printf '  curl -fsSL %s | sh -s -- --uninstall --purge\n' "$INSTALL_URL"

@@ -313,7 +313,9 @@ curl -fsSL https://raw.githubusercontent.com/sahabji0P/netra/master/install.sh |
 
 This quits Netra and removes `Netra.app` from `/Applications` and
 `~/Applications`. Add `--purge` to also delete its settings, caches, and
-`~/Library/Application Support/Netra`. Keychain items (**Netra Account Vault**,
+`~/Library/Application Support/Netra`. That folder holds your recorded usage
+history, which can't be rebuilt for days whose agent logs are already gone, so
+only purge if you mean to lose it. Keychain items (**Netra Account Vault**,
 the website publishing token) are never deleted by the script; remove them in
 Keychain Access if you don't need them. If Netra still appears under System
 Settings → General → Login Items, remove it there. Homebrew installs:
