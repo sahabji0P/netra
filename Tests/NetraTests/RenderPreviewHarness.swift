@@ -30,6 +30,9 @@ final class RenderPreviewHarness: XCTestCase {
                 persistence: RenderInertPersistence()
             ),
             feedFile: UsageFeedFile(url: URL(fileURLWithPath: outputDir).appendingPathComponent("usage-feed.json")),
+            // Start from an empty history each run, and leave Netra's own untouched.
+            ledger: UsageLedger(fileURL: URL(fileURLWithPath: outputDir)
+                .appendingPathComponent("usage-history-\(UUID().uuidString).json")),
             publisher: UsagePublisher(defaults: UserDefaults(suiteName: suiteName)!, version: "render", tokenProvider: { _ in nil }),
             startsAutomatically: false
         )
@@ -76,7 +79,7 @@ final class RenderPreviewHarness: XCTestCase {
         for section in [DashboardSection.menuBar, .limits, .providers, .general] {
             render(
                 DashboardSettingsView(section: section, preferences: preferences, store: store)
-                    .frame(width: 860, height: 1000),
+                    .frame(width: 860, height: 1500),
                 name: "settings-\(section.rawValue)", outputDir: outputDir
             )
         }

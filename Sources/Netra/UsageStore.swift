@@ -59,6 +59,7 @@ final class UsageStore {
     private let liveQuotaMaxAge: TimeInterval = 5 * 60
     private var codexLiveAttemptedAt: Date?
     private let cursorEventStore = CursorEventStore()
+    private let ledger: UsageLedger
     private let feedFile: UsageFeedFile
     private let publisher: UsagePublisher
     /// Managed accounts, when multi-account switching is wired in. Limits are
@@ -88,12 +89,14 @@ final class UsageStore {
         alerts: UsageAlertController? = nil,
         celebrations: ResetCelebrationStore = ResetCelebrationStore(),
         feedFile: UsageFeedFile = UsageFeedFile(),
+        ledger: UsageLedger = UsageLedger(),
         publisher: UsagePublisher? = nil,
         accounts: AccountStore? = nil,
         startsAutomatically: Bool = true
     ) {
         self.preferences = preferences
         self.feedFile = feedFile
+        self.ledger = ledger
         self.accounts = accounts
         self.publisher = publisher ?? UsagePublisher(version: Self.appVersion)
         self.alerts = alerts ?? UsageAlertController()
@@ -117,16 +120,25 @@ final class UsageStore {
         state = .refreshing
         let task = Task {
             do {
-                var report = try await client.fetchReport()
+                // Read the logs: everything on the first run, after a ccusage
+                // upgrade and once a day; otherwise only the last few days.
+                // The recorded history supplies every other day.
+                let engine = await client.version()
+                var scan = UsageScan.next(engine: engine, history: await ledger.current())
+                var report = try await client.fetchReport(scan)
                 // Models absent from ccusage's offline pricing table come back
                 // costed $0, and Hermes' OpenAI sessions hit a mis-routed
-                // price; pull real list pricing once and rescan.
+                // price; pull real list pricing once and rescan everything,
+                // so the corrected price reaches every day that still has logs.
                 var overrideKeys = PricingAudit.hermesRoutingKeys(in: report)
                 for model in PricingOverrides.unpricedModels(in: report) { overrideKeys[model] = model }
                 if !overrideKeys.isEmpty, await PricingOverrides.ensure(keys: overrideKeys) {
-                    report = try await client.fetchReport()
+                    scan = .complete
+                    report = try await client.fetchReport(scan)
                 }
-                auditPricing(of: report)
+                // A recent scan holds only a few days of each month; auditing
+                // those would drop and re-raise findings for earlier usage.
+                if scan == .complete { auditPricing(of: report) }
                 // Block and quota data are bonuses — their failure must not fail the refresh.
                 // Keep the last observed values when a secondary reader fails;
                 // a successful "no active block" result still clears that value.
@@ -246,10 +258,15 @@ final class UsageStore {
                         return try await CursorUsageEventsFetcher.fetch(cookie: cookie, since: since, until: until)
                     }
                 }
-                let fresh = UsageSnapshot(fetchedAt: .now, report: report,
-                                          activeBlock: block, codexQuota: codexQuota,
-                                          claudeQuota: claudeQuota, cursorQuota: cursorQuota,
-                                          cursorEvents: cursorEvents)
+                let days = await ledger.record(
+                    report, cursorEvents: cursorEvents, complete: scan == .complete, engine: engine
+                )
+                // Summing the history into weeks and months is not main-actor work.
+                let fresh = await Task.detached {
+                    UsageSnapshot(fetchedAt: .now, daily: days,
+                                  activeBlock: block, codexQuota: codexQuota,
+                                  claudeQuota: claudeQuota, cursorQuota: cursorQuota)
+                }.value
                 snapshot = fresh
                 state = .fresh
                 await cache.save(fresh)

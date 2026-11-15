@@ -88,9 +88,10 @@ own dashboard API:
   hide on its own. It appears only when your plan includes Grok Bot.
 - Per-request usage history (`get-filtered-usage-events`) — every Cursor
   surface (editor, CLI, background agents, Grok Bot) on every machine. It is
-  backfilled once for the same 190-day window as the other providers, then
-  synced incrementally every 15 minutes, and kept in
-  `~/Library/Application Support/Netra/cursor-events.json`. Each request's
+  backfilled once for the last 190 days, then synced incrementally every
+  15 minutes, and kept in
+  `~/Library/Application Support/Netra/cursor-events.json` (older days stay
+  in Netra's usage history, below). Each request's
   cost is Cursor's own API-rate price for it, the same basis as the estimates
   for other agents, so Cursor sits in the day / week / month totals and charts.
   Grok Bot requests appear as their own **Cursor Grok Bot** line, so the
@@ -123,10 +124,36 @@ popover, and optional daily-token or usage-indicator alerts. macOS
 notification permission is requested only after an alert is enabled.
 Equivalent API cost is an estimate, not subscription spend. Models missing
 from ccusage's offline price table, and Hermes sessions billed through OpenAI
-(which ccusage 20.0.32 prices at the wrong rate), get LiteLLM list-price
+(which ccusage has priced at the wrong rate), get LiteLLM list-price
 overrides fetched once. Each refresh also compares every model-month against
 tokens × list price (a weekly-refreshed LiteLLM snapshot) and logs any cost
 more than 25% below or 2.5× above it under the `pricing` log category.
+
+## Usage history
+
+Coding agents do not keep their session logs: Claude Code deletes transcripts
+after 30 days by default, Codex compresses and archives old sessions, and you
+may clear them yourself to free space. Netra therefore keeps its own record
+of what it has read: tokens and estimated cost per day, agent, and model, and
+nothing else, in `~/Library/Application Support/Netra/usage-history.json`.
+
+- Every total, chart, and the usage feed is built from this history, so a day
+  stays in your numbers after its logs are gone. Once Netra has refreshed,
+  old session logs can be deleted without losing their usage. Settings →
+  General → **About your data** shows the first day on record.
+- A day's figure for an agent is updated while its logs exist (growth, price
+  corrections, parser fixes) and is never lowered: fewer tokens than were
+  recorded means logs were removed, not that less was used.
+- For usage totals, a refresh reads only the last three days of logs. Netra
+  reads everything the agents still have on the first run, after a ccusage
+  upgrade, when a missing price is filled in, and once a day. (The local
+  5-hour block estimate still reads 60 days of Claude Code logs each time.)
+- History starts when Netra first reads a day. Usage whose logs were already
+  deleted before that cannot be recovered. To make Claude Code keep its
+  transcripts longer in the meantime, set `cleanupPeriodDays` in
+  `~/.claude/settings.json`.
+- Days are keyed in this Mac's time zone. After a time-zone change, the few
+  days being re-read may briefly count a few hours twice.
 
 ## Notch island
 
@@ -282,6 +309,7 @@ pinned binary against synthetic logs in `PinnedCCUsageTests`) — or set
 - `Sources/Netra/` — the app (SwiftUI `MenuBarExtra`, window-style popover)
   - `CCUsageClient.swift` — actor that runs the pinned native ccusage binary
   - `UsageStore.swift` — snapshot state machine (empty/refreshing/fresh/stale/failed) + last-success cache
+  - `UsageLedger.swift` — the recorded per-day usage history and the rule for how much of the logs each refresh reads
   - `CursorUsageEvents.swift` — Cursor usage-event parsing, paged fetch, and the incremental on-disk store
   - `CursorUsageFetcher.swift` — Cursor cycle tokens, API-rate value, and quota windows
   - `Dashboard*.swift` — full Usage and Settings window
@@ -290,7 +318,7 @@ pinned binary against synthetic logs in `PinnedCCUsageTests`) — or set
   - `MenuView.swift` / `LimitsViews.swift` / `LimitSummary.swift` — the popover UI and limit/pace text rules
   - `Account*.swift`, `ClaudeAccountSession.swift`, `CodexAccountSession.swift` — multi-account roster, Keychain vault, and the Claude Code / Codex sign-in swap
   - `AccountsViews.swift` / `DashboardAccountsView.swift` — account switcher in the popover and the Accounts settings page
-- `ccusage-bin` — pinned ccusage 20.0.32 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
+- `ccusage-bin` — pinned ccusage 20.0.51 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
 - `VERSION` — next app-bundle version used by local builds (publishing remains explicit)
 - `fixtures/` — captured real JSON output + benchmark notes
 

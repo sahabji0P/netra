@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - ccusage JSON DTOs (schema pinned to ccusage 20.0.32 unified report)
+// MARK: - ccusage JSON DTOs (schema pinned to ccusage 20.0.51 unified report)
 
 struct CCUnifiedReport: Decodable {
     var daily: [CCRow]?
@@ -283,39 +283,29 @@ struct PeriodRow: Codable, Hashable, Identifiable, Sendable {
         )
     }
 
-    /// Adds a provider's usage into this row, rebuilding totals. Used to fold
-    /// Cursor's server-side usage events into ccusage's period rows.
-    func adding(agent: AgentStat) -> PeriodRow {
-        var agentsByName: [String: AgentStat] = Dictionary(
-            uniqueKeysWithValues: agents.map { ($0.name, $0) }
-        )
-        if var existing = agentsByName[agent.name] {
-            existing.cost += agent.cost
-            existing.totalTokens += agent.totalTokens
-            existing.inputTokens += agent.inputTokens
-            existing.outputTokens += agent.outputTokens
-            existing.cacheCreationTokens += agent.cacheCreationTokens
-            existing.cacheReadTokens += agent.cacheReadTokens
-            existing.models = (existing.models + agent.models).combinedByName()
-            agentsByName[agent.name] = existing
-        } else {
-            agentsByName[agent.name] = agent
-        }
-        let mergedAgents = agentsByName.values.sorted {
-            $0.cost == $1.cost ? $0.totalTokens > $1.totalTokens : $0.cost > $1.cost
-        }
-        return PeriodRow(
+    /// A period rebuilt from recorded per-agent usage. `other` (see
+    /// `unattributed`) counts toward the totals without being listed as an
+    /// agent, exactly as it did in the report it was recorded from.
+    init(period: String, date: Date, parts: [AgentStat]) {
+        self.init(
             period: period,
             date: date,
-            cost: cost + agent.cost,
-            inputTokens: inputTokens + agent.inputTokens,
-            outputTokens: outputTokens + agent.outputTokens,
-            cacheCreationTokens: cacheCreationTokens + agent.cacheCreationTokens,
-            cacheReadTokens: cacheReadTokens + agent.cacheReadTokens,
-            totalTokens: totalTokens + agent.totalTokens,
-            agents: mergedAgents,
-            models: (models + agent.models).combinedByName()
+            cost: parts.reduce(0) { $0 + $1.cost },
+            inputTokens: parts.reduce(0) { $0 + $1.inputTokens },
+            outputTokens: parts.reduce(0) { $0 + $1.outputTokens },
+            cacheCreationTokens: parts.reduce(0) { $0 + $1.cacheCreationTokens },
+            cacheReadTokens: parts.reduce(0) { $0 + $1.cacheReadTokens },
+            totalTokens: parts.reduce(0) { $0 + $1.totalTokens },
+            agents: parts.filter { $0.name != "other" }.sorted {
+                $0.cost == $1.cost ? $0.totalTokens > $1.totalTokens : $0.cost > $1.cost
+            },
+            models: parts.flatMap(\.models).combinedByName()
         )
+    }
+
+    /// Every part of this row that carries usage: its agents plus `other`.
+    var parts: [AgentStat] {
+        agents + [unattributed].compactMap { $0 }
     }
 }
 
@@ -512,9 +502,10 @@ struct UsageSnapshot: Codable, Sendable {
     var claudeQuota: ClaudeQuota?
     var cursorQuota: CursorQuota?
 
-    init(fetchedAt: Date, report: CCUnifiedReport, activeBlock: BlockStat?,
+    /// Weeks and months are summed from `daily`, so every tab reads the same
+    /// recorded history whatever span the latest scan covered.
+    init(fetchedAt: Date, daily: [PeriodRow], activeBlock: BlockStat?,
          codexQuota: CodexQuota?, claudeQuota: ClaudeQuota?, cursorQuota: CursorQuota? = nil,
-         cursorEvents: [CursorUsageEvent] = [],
          calendar: Calendar = .current) {
         self.fetchedAt = fetchedAt
         self.activeBlock = activeBlock
@@ -522,32 +513,25 @@ struct UsageSnapshot: Codable, Sendable {
         self.claudeQuota = claudeQuota
         self.cursorQuota = cursorQuota
 
-        func rows(_ source: [CCRow]?, dateFormat: String) -> [PeriodRow] {
-            let formatter = PeriodKeys.formatter(dateFormat, calendar)
-            return (source ?? []).compactMap { row in
-                guard let date = formatter.date(from: row.period) else { return nil }
-                let agents = (row.agents ?? [])
-                    .map { agent in
-                        AgentStat(
-                            name: agent.agent, cost: agent.totalCost, totalTokens: agent.totalTokens,
-                            inputTokens: agent.inputTokens, outputTokens: agent.outputTokens,
-                            cacheCreationTokens: agent.cacheCreationTokens,
-                            cacheReadTokens: agent.cacheReadTokens,
-                            models: modelStats(agent.modelBreakdowns)
-                        )
-                    }
-                    .sorted { $0.cost > $1.cost }
-                return PeriodRow(
-                    period: row.period, date: date, cost: row.totalCost,
-                    inputTokens: row.inputTokens, outputTokens: row.outputTokens,
-                    cacheCreationTokens: row.cacheCreationTokens,
-                    cacheReadTokens: row.cacheReadTokens,
-                    totalTokens: row.totalTokens, agents: agents,
-                    models: modelStats(row.modelBreakdowns)
-                )
+        let keys = PeriodKeys.Keyer(calendar)
+        func totals(by period: (Date) -> (key: String, date: Date)) -> [PeriodRow] {
+            var groups: [String: (date: Date, rows: [PeriodRow])] = [:]
+            for row in daily {
+                let (key, date) = period(row.date)
+                groups[key, default: (date, [])].rows.append(row)
             }
+            return groups
+                .map { DashboardUsageAggregator.aggregate($0.value.rows, period: $0.key, date: $0.value.date) }
+                .sorted { $0.date < $1.date }
         }
+        self.daily = daily.sorted { $0.date < $1.date }
+        weekly = totals(by: keys.week)
+        monthly = totals(by: keys.month)
+    }
 
+    /// ccusage's daily rows as normalized rows. Rows whose period is not a
+    /// day key are dropped rather than guessed at.
+    static func dayRows(from report: CCUnifiedReport, calendar: Calendar = .current) -> [PeriodRow] {
         func modelStats(_ breakdowns: [CCModelBreakdown]?) -> [ModelStat] {
             (breakdowns ?? [])
                 .map {
@@ -563,55 +547,46 @@ struct UsageSnapshot: Codable, Sendable {
                 .sorted { $0.cost > $1.cost }
         }
 
-        daily = Self.merging(cursorEvents, into: rows(report.daily, dateFormat: "yyyy-MM-dd"),
-                             granularity: .day, calendar: calendar)
-        weekly = Self.merging(cursorEvents, into: rows(report.weekly, dateFormat: "yyyy-MM-dd"),
-                              granularity: .week, calendar: calendar)
-        monthly = Self.merging(cursorEvents, into: rows(report.monthly, dateFormat: "yyyy-MM"),
-                               granularity: .month, calendar: calendar)
-    }
-
-    static func merging(
-        _ events: [CursorUsageEvent],
-        into rows: [PeriodRow],
-        granularity: PeriodGranularity,
-        calendar: Calendar
-    ) -> [PeriodRow] {
-        let extras = CursorUsageEvents.agentStats(from: events, granularity: granularity, calendar: calendar)
-        guard !extras.isEmpty else { return rows }
-        var byPeriod = Dictionary(uniqueKeysWithValues: rows.map { ($0.period, $0) })
-        for item in extras {
-            if let existing = byPeriod[item.period] {
-                byPeriod[item.period] = existing.adding(agent: item.agent)
-            } else {
-                byPeriod[item.period] = PeriodRow(
-                    period: item.period, date: item.date, cost: item.agent.cost,
-                    inputTokens: item.agent.inputTokens, outputTokens: item.agent.outputTokens,
-                    cacheCreationTokens: item.agent.cacheCreationTokens,
-                    cacheReadTokens: item.agent.cacheReadTokens,
-                    totalTokens: item.agent.totalTokens,
-                    agents: [item.agent], models: item.agent.models
-                )
-            }
+        let keys = PeriodKeys.Keyer(calendar)
+        return (report.daily ?? []).compactMap { row in
+            guard let date = keys.date(fromDay: row.period) else { return nil }
+            let agents = (row.agents ?? [])
+                .map { agent in
+                    AgentStat(
+                        name: agent.agent, cost: agent.totalCost, totalTokens: agent.totalTokens,
+                        inputTokens: agent.inputTokens, outputTokens: agent.outputTokens,
+                        cacheCreationTokens: agent.cacheCreationTokens,
+                        cacheReadTokens: agent.cacheReadTokens,
+                        models: modelStats(agent.modelBreakdowns)
+                    )
+                }
+                .sorted { $0.cost > $1.cost }
+            return PeriodRow(
+                period: row.period, date: date, cost: row.totalCost,
+                inputTokens: row.inputTokens, outputTokens: row.outputTokens,
+                cacheCreationTokens: row.cacheCreationTokens,
+                cacheReadTokens: row.cacheReadTokens,
+                totalTokens: row.totalTokens, agents: agents,
+                models: modelStats(row.modelBreakdowns)
+            )
         }
-        return byPeriod.values.sorted { $0.date < $1.date }
     }
 
     /// The row for "now" in the given granularity; zero row when nothing was used yet.
     func currentRow(for tab: PeriodTab, now: Date = .now, calendar: Calendar = .current) -> PeriodRow {
+        // A period only has a row once it has usage, so the last row can be
+        // an earlier one; match the current key instead of taking the last.
+        let keys = PeriodKeys.Keyer(calendar)
         switch tab {
         case .today:
-            let key = PeriodKeys.day(now, calendar)
-            return daily.first { $0.period == key } ?? .zero(period: key, date: calendar.startOfDay(for: now))
+            let key = keys.day(now)
+            return daily.last { $0.period == key } ?? .zero(period: key, date: keys.startOfDay(now))
         case .week:
-            // ccusage only emits a week once it has usage, so the last row can
-            // be last week; match this week's Monday key instead.
-            let week = PeriodKeys.weekStart(now, calendar)
-            return weekly.first { $0.period == week.key } ?? .zero(period: week.key, date: week.date)
+            let week = keys.week(now)
+            return weekly.last { $0.period == week.key } ?? .zero(period: week.key, date: week.date)
         case .month:
-            let key = PeriodKeys.month(now, calendar)
-            let start = PeriodKeys.gregorian(calendar).dateInterval(of: .month, for: now)?.start ?? now
-            return monthly.first { $0.period == key } ?? .zero(period: key, date: start)
+            let month = keys.month(now)
+            return monthly.last { $0.period == month.key } ?? .zero(period: month.key, date: month.date)
         }
     }
 

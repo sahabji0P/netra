@@ -21,9 +21,11 @@ final class CalculationRegressionTests: XCTestCase {
     func testPeriodKeysIgnoreNonGregorianCalendarsAndLocales() {
         let date = ISODate.parse("2026-09-26T06:00:00Z")!
         for identifier in [Calendar.Identifier.japanese, .buddhist, .gregorian] {
+            let keys = PeriodKeys.Keyer(calendar(identifier))
             XCTAssertEqual(PeriodKeys.day(date, calendar(identifier)), "2026-09-26")
-            XCTAssertEqual(PeriodKeys.month(date, calendar(identifier)), "2026-09")
-            XCTAssertEqual(PeriodKeys.weekStart(date, calendar(identifier)).key, "2026-09-21")
+            XCTAssertEqual(keys.day(date), "2026-09-26")
+            XCTAssertEqual(keys.month(date).key, "2026-09")
+            XCTAssertEqual(keys.week(date).key, "2026-09-21")
         }
         let parsed = PeriodKeys.formatter("yyyy-MM-dd", calendar(.japanese)).date(from: "2026-09-26")
         XCTAssertEqual(parsed.map { PeriodKeys.day($0, calendar(.gregorian)) }, "2026-09-26")
@@ -39,15 +41,16 @@ final class CalculationRegressionTests: XCTestCase {
         XCTAssertEqual(snapshot.currentRow(for: .today, now: now, calendar: japanese).cost, 2)
     }
 
-    /// ccusage only emits a week once it has usage; on a quiet Monday the
-    /// last weekly row is last week and must not read as "this week".
+    /// A week only has a row once it has usage; on a quiet Monday the last
+    /// weekly row is last week and must not read as "this week".
     func testCurrentWeekMatchesThisMondayNotTheLastRow() {
         let report = CCUnifiedReport(
-            daily: [], weekly: [row("2026-09-14", .now, cost: 5, tokens: 50)], monthly: []
+            daily: [row("2026-09-16", .now, cost: 5, tokens: 50)], weekly: [], monthly: []
         )
         let cal = calendar(.gregorian)
         let snapshot = UsageSnapshot(fetchedAt: .now, report: report, activeBlock: nil,
                                      codexQuota: nil, claudeQuota: nil, calendar: cal)
+        XCTAssertEqual(snapshot.weekly.map(\.period), ["2026-09-14"])
         let monday = ISODate.parse("2026-09-21T04:00:00Z")!
         let week = snapshot.currentRow(for: .week, now: monday, calendar: cal)
         XCTAssertEqual(week.period, "2026-09-21")

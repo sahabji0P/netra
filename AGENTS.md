@@ -27,6 +27,11 @@ instructions.
   the pinned `ccusage-bin` sidecar. It is the primary usage-data boundary.
 - `Sources/Netra/Models.swift` contains external ccusage DTOs and the normalized,
   persisted domain models consumed by the UI.
+- `Sources/Netra/UsageLedger.swift` is the recorded usage history: per-day,
+  per-agent totals in `usage-history.json` that outlive the agents' session
+  logs. `UsageHistory` holds the rule for what a new reading may change,
+  `UsageScan` decides whether a refresh reads all logs or only recent days,
+  and the `UsageLedger` actor persists it. Every snapshot is built from it.
 - `ClaudeQuotaFetcher.swift`, `ClaudeCachedQuotaReader.swift`,
   `CodexQuotaReader.swift`, `CursorUsageFetcher.swift`,
   `CursorUsageEvents.swift`, and `PricingOverrides.swift` adapt secondary or
@@ -68,6 +73,11 @@ instructions.
 - A failed refresh must never overwrite the last successful snapshot. Preserve
   freshness provenance (`fetchedAt`, observed timestamps, and stale UI labels)
   across fallbacks.
+- The usage history is the only copy of usage whose logs are gone. A reading
+  may raise or reprice a recorded day, never lower it or drop it; an
+  unreadable history file is set aside, never overwritten. Days, weeks, and
+  months shown anywhere are sums of the recorded days, not ccusage's own
+  weekly or monthly sections, so a recent-days scan cannot shrink them.
 - Keep transport DTOs separate from normalized UI/persistence models. When an
   external JSON or JSONL shape changes, update the adapter and add or update a
   captured fixture plus a contract test.

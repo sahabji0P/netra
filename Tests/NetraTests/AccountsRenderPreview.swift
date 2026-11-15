@@ -22,6 +22,8 @@ final class AccountsRenderPreview: XCTestCase {
             preferences: preferences,
             alerts: UsageAlertController(scheduler: AccountsInertScheduler(), persistence: AccountsInertPersistence()),
             feedFile: UsageFeedFile(url: URL(fileURLWithPath: outputDir).appendingPathComponent("accounts-feed.json")),
+            ledger: UsageLedger(fileURL: URL(fileURLWithPath: outputDir)
+                .appendingPathComponent("accounts-history-\(UUID().uuidString).json")),
             publisher: UsagePublisher(defaults: UserDefaults(suiteName: suiteName)!, version: "render", tokenProvider: { _ in nil }),
             startsAutomatically: false
         )

@@ -19,24 +19,43 @@ enum CCUsageError: LocalizedError {
 
 /// Runs the pinned native ccusage binary. Actor: at most one scan at a time.
 actor CCUsageClient {
-    private let timeout: TimeInterval = 20
     private var cachedBinary: URL?
+    private var cachedVersion: String?
     private let log = Logger(subsystem: "com.sahabji0P.netra", category: "ccusage")
 
-    func fetchReport() async throws -> CCUnifiedReport {
-        let data = try await runJSON([
+    /// Usage per day and agent. A recent scan reads only the trailing days
+    /// (a fraction of the time and memory of a complete one); the days it
+    /// reports are whole, so it can be recorded straight into the history.
+    func fetchReport(_ scan: UsageScan) async throws -> CCUnifiedReport {
+        var arguments = [
             "daily",
             "--sections", "daily,weekly,monthly",
             "--by-agent",
             "--json",
             "--offline",
-            "--since", sinceArgument(daysBack: 190),
-        ])
+        ]
+        if scan == .recent {
+            arguments += ["--since", sinceArgument(daysBack: UsageScan.recentDaysBack)]
+        }
+        // A complete scan reads every log the agents still have, however
+        // many years that is; give it room a recent scan never needs.
+        let data = try await runJSON(arguments, timeout: scan == .complete ? 120 : 20)
         do {
             return try JSONDecoder().decode(CCUnifiedReport.self, from: data)
         } catch {
             throw CCUsageError.decoding("\(error)")
         }
+    }
+
+    /// The pinned binary's version ("20.0.51"), read once. Nil when it
+    /// cannot be read; the scan itself then reports the real failure.
+    func version() async -> String? {
+        if let cachedVersion { return cachedVersion }
+        guard let data = try? await runJSON(["--version"], timeout: 10),
+              let version = String(data: data, encoding: .utf8)?
+                  .split(whereSeparator: \.isWhitespace).last.map(String.init) else { return nil }
+        cachedVersion = version
+        return version
     }
 
     /// The active 5-hour billing block; 60 days of history give the
@@ -48,7 +67,7 @@ actor CCUsageClient {
             "--offline",
             "--token-limit", "max",
             "--since", sinceArgument(daysBack: 60),
-        ])
+        ], timeout: 20)
         do {
             let report = try JSONDecoder().decode(CCBlocksReport.self, from: data)
             return BlockStat(block: report.blocks?.first { $0.isActive == true })
@@ -62,7 +81,7 @@ actor CCUsageClient {
         return PeriodKeys.formatter("yyyyMMdd").string(from: since)
     }
 
-    private func runJSON(_ arguments: [String]) async throws -> Data {
+    private func runJSON(_ arguments: [String], timeout: TimeInterval) async throws -> Data {
         let binary = try resolveBinary()
 
         let process = Process()
