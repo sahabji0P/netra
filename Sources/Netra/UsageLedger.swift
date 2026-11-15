@@ -65,6 +65,12 @@ enum UsageScan: Equatable, Sendable {
     /// Only the trailing days, where new usage lands.
     case recent
 
+    /// Whether the report holds whole months. Anything that judges a month's
+    /// totals, such as the pricing audit, is only meaningful when it does: a
+    /// recent scan carries a few days of each month, which would drop a
+    /// finding for earlier usage and raise it again at the next complete scan.
+    var coversWholeMonths: Bool { self == .complete }
+
     /// Days before today a recent scan still reads. Usage is keyed by the
     /// time it happened, so new usage only ever lands on today; the margin
     /// covers midnight and a time-zone change.
