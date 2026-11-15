@@ -21,7 +21,7 @@ final class CalculationRegressionTests: XCTestCase {
     func testPeriodKeysIgnoreNonGregorianCalendarsAndLocales() {
         let date = ISODate.parse("2026-09-26T06:00:00Z")!
         for identifier in [Calendar.Identifier.japanese, .buddhist, .gregorian] {
-            let keys = PeriodKeys.Keyer(calendar(identifier))
+            let keys = PeriodKeys.keyer(calendar(identifier))
             XCTAssertEqual(PeriodKeys.day(date, calendar(identifier)), "2026-09-26")
             XCTAssertEqual(keys.day(date), "2026-09-26")
             XCTAssertEqual(keys.month(date).key, "2026-09")
@@ -29,6 +29,16 @@ final class CalculationRegressionTests: XCTestCase {
         }
         let parsed = PeriodKeys.formatter("yyyy-MM-dd", calendar(.japanese)).date(from: "2026-09-26")
         XCTAssertEqual(parsed.map { PeriodKeys.day($0, calendar(.gregorian)) }, "2026-09-26")
+    }
+
+    /// The shared keyer is reused between calls; it must follow the time
+    /// zone it is asked for, not the one it was last built with.
+    func testSharedKeyerFollowsTheTimeZone() {
+        let instant = ISODate.parse("2026-09-26T20:00:00Z")!
+        XCTAssertEqual(PeriodKeys.keyer(calendar(.gregorian, "Asia/Kolkata")).day(instant), "2026-09-27")
+        XCTAssertEqual(PeriodKeys.keyer(calendar(.gregorian, "America/Los_Angeles")).day(instant), "2026-09-26")
+        XCTAssertEqual(PeriodKeys.day(instant, calendar(.gregorian, "Asia/Kolkata")), "2026-09-27")
+        XCTAssertEqual(PeriodKeys.keyer(calendar(.gregorian, "Asia/Kolkata")).month(instant).key, "2026-09")
     }
 
     func testSnapshotRowsSurviveJapaneseCalendar() {

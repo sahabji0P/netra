@@ -513,7 +513,7 @@ struct UsageSnapshot: Codable, Sendable {
         self.claudeQuota = claudeQuota
         self.cursorQuota = cursorQuota
 
-        let keys = PeriodKeys.Keyer(calendar)
+        let keys = PeriodKeys.keyer(calendar)
         func totals(by period: (Date) -> (key: String, date: Date)) -> [PeriodRow] {
             var groups: [String: (date: Date, rows: [PeriodRow])] = [:]
             for row in daily {
@@ -547,7 +547,7 @@ struct UsageSnapshot: Codable, Sendable {
                 .sorted { $0.cost > $1.cost }
         }
 
-        let keys = PeriodKeys.Keyer(calendar)
+        let keys = PeriodKeys.keyer(calendar)
         return (report.daily ?? []).compactMap { row in
             guard let date = keys.date(fromDay: row.period) else { return nil }
             let agents = (row.agents ?? [])
@@ -576,7 +576,7 @@ struct UsageSnapshot: Codable, Sendable {
     func currentRow(for tab: PeriodTab, now: Date = .now, calendar: Calendar = .current) -> PeriodRow {
         // A period only has a row once it has usage, so the last row can be
         // an earlier one; match the current key instead of taking the last.
-        let keys = PeriodKeys.Keyer(calendar)
+        let keys = PeriodKeys.keyer(calendar)
         switch tab {
         case .today:
             let key = keys.day(now)

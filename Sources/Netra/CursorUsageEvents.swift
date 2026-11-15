@@ -125,7 +125,7 @@ enum CursorUsageEvents {
         from events: [CursorUsageEvent],
         calendar: Calendar = .current
     ) -> [(day: String, agents: [AgentStat])] {
-        let keys = PeriodKeys.Keyer(calendar)
+        let keys = PeriodKeys.keyer(calendar)
         // Thousands of events fall on a few hundred days: key each day once.
         var dayKeys: [Date: String] = [:]
         var buckets: [String: [String: [CursorUsageEvent]]] = [:]

@@ -129,7 +129,7 @@ extension UsageFeed {
     /// since the snapshot was cached. Fall back only for unexpected keys.
     private static func dayKey(for row: PeriodRow, calendar: Calendar) -> String {
         let period = row.period
-        if period.count == 10, PeriodKeys.formatter("yyyy-MM-dd", calendar).date(from: period) != nil {
+        if period.count == 10, PeriodKeys.keyer(calendar).date(fromDay: period) != nil {
             return period
         }
         return PeriodKeys.day(row.date, calendar)

@@ -124,7 +124,7 @@ struct IslandStatsModel: Equatable, Sendable {
         let daily = (snapshot?.daily ?? []).map { $0.filtered(hidingProviders: hiddenProviders) }
         let byDay = Dictionary(daily.map { ($0.period, $0) }, uniquingKeysWith: { first, _ in first })
         let todayStart = calendar.startOfDay(for: now)
-        let keys = PeriodKeys.Keyer(calendar)
+        let keys = PeriodKeys.keyer(calendar)
 
         func day(_ offset: Int) -> (key: String, date: Date) {
             let date = calendar.date(byAdding: .day, value: -offset, to: todayStart) ?? todayStart

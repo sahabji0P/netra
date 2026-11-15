@@ -49,7 +49,7 @@ struct UsageHistory: Codable, Equatable, Sendable {
 
     /// Every recorded day, oldest first.
     func rows(calendar: Calendar = .current) -> [PeriodRow] {
-        let keys = PeriodKeys.Keyer(calendar)
+        let keys = PeriodKeys.keyer(calendar)
         return days
             .compactMap { day, agents in
                 keys.date(fromDay: day).map { PeriodRow(period: day, date: $0, parts: agents) }

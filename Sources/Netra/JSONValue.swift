@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Lenient readers for untyped JSON from undocumented provider APIs, which
 /// send the same field as a number in one response and a string in another.
@@ -74,19 +75,38 @@ enum PeriodKeys {
     }
 
     static func day(_ date: Date, _ base: Calendar = .current) -> String {
-        formatter("yyyy-MM-dd", base).string(from: date)
+        keyer(base).day(date)
     }
 
-    /// Day, week and month keys for any number of dates. Building a formatter
-    /// costs far more than using one, so anything that keys a whole history
-    /// makes one `Keyer` and reuses it.
-    struct Keyer {
+    /// The keys for `base`'s time zone. Building formatters costs far more
+    /// than using them, and views ask for the current period on every
+    /// render, so the last `Keyer` is kept and reused until the time zone
+    /// changes.
+    static func keyer(_ base: Calendar = .current) -> Keyer {
+        cached.withLock { cached in
+            if let cached, cached.timeZone == base.timeZone { return cached }
+            let keyer = Keyer(timeZone: base.timeZone)
+            cached = keyer
+            return keyer
+        }
+    }
+
+    private static let cached = OSAllocatedUnfairLock<Keyer?>(initialState: nil)
+
+    /// Day, week and month keys in one time zone. Its formatters and
+    /// calendars are never changed after `init`, and formatting with a
+    /// `DateFormatter` is thread-safe, so one instance is shared freely.
+    struct Keyer: @unchecked Sendable {
+        let timeZone: TimeZone
         private let gregorian: Calendar
         private let weeks: Calendar
         private let dayFormatter: DateFormatter
         private let monthFormatter: DateFormatter
 
-        init(_ base: Calendar = .current) {
+        fileprivate init(timeZone: TimeZone) {
+            var base = Calendar(identifier: .gregorian)
+            base.timeZone = timeZone
+            self.timeZone = timeZone
             gregorian = PeriodKeys.gregorian(base)
             weeks = PeriodKeys.weeks(base)
             dayFormatter = PeriodKeys.formatter("yyyy-MM-dd", base)
