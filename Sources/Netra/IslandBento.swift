@@ -247,34 +247,30 @@ struct IslandCostTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
-                Text(title)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(IslandTheme.secondaryText)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
                 rangePicker
+                Spacer(minLength: 0)
+                // Only a clicked day needs naming; the picker names the rest.
+                if let day = model.focusDay, !model.focusIsToday {
+                    Text(day.date.formatted(.dateTime.day().month(.abbreviated)))
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                        .lineLimit(1)
+                }
             }
             Button(action: openUsage) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(Format.cost(model.cost))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .contentTransition(.numericText())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    Text("\(Format.tokens(model.tokens)) tokens")
-                        .font(.system(size: 10.5))
-                        .monospacedDigit()
-                        .foregroundStyle(IslandTheme.secondaryText)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top, spacing: 10) {
+                        figure(Format.cost(model.cost), label: "cost")
+                        figure(Format.tokens(model.tokens), label: "tokens")
+                    }
                     trend
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.top, 5)
-            .help("Estimated at API list prices, not your subscription bill. Click to open Usage.")
+            .padding(.top, 12)
+            .help("Cost is estimated at API list prices, not your subscription bill. Click to open Usage.")
             Spacer(minLength: 10)
             bars
         }
@@ -284,15 +280,24 @@ struct IslandCostTile: View {
         .animation(.easeOut(duration: 0.15), value: model.range)
     }
 
-    private var title: String {
-        if let day = model.focusDay, !model.focusIsToday {
-            return day.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)).uppercased()
+    /// Cost and tokens carry equal weight: one number each, with its name
+    /// underneath.
+    private func figure(_ value: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value)
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(IslandTheme.secondaryText)
         }
-        switch model.range {
-        case .today: return "TODAY"
-        case .week: return model.focusDay == nil ? "7 DAYS" : "TODAY"
-        case .month: return model.focusDay == nil ? "30 DAYS" : "TODAY"
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) \(value)")
     }
 
     private var rangePicker: some View {
@@ -330,13 +335,12 @@ struct IslandCostTile: View {
             HStack(spacing: 3) {
                 Image(systemName: up ? "arrow.up.right" : "arrow.down.right")
                     .font(.system(size: 8, weight: .bold))
-                Text("\(amount) \(model.trendCaption)")
-                    .font(.system(size: 10, weight: .medium))
+                Text("\(amount) cost \(model.trendCaption)")
+                    .font(.system(size: 9.5, weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             .foregroundStyle(up ? IslandTheme.warning : IslandTheme.fresh)
-            .padding(.top, 1)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(up ? "Up" : "Down") \(amount) \(model.trendCaption)")
         }
