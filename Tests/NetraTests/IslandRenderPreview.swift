@@ -15,8 +15,9 @@ final class IslandRenderPreview: XCTestCase {
         }
         try FileManager.default.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
-        let suiteName = "NetraTests.IslandRender.\(UUID().uuidString)"
+        let suiteName = "NetraTests.IslandRender"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferences(defaults: defaults)
         let now = Date.now
@@ -258,8 +259,9 @@ final class IslandDataTests: XCTestCase {
     }
 
     func testIslandSectionsDefaultToTheTrimmedSetAndPersist() {
-        let suite = "NetraTests.IslandSections.\(UUID().uuidString)"
+        let suite = "NetraTests.IslandSections"
         let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
         let preferences = AppPreferences(defaults: defaults)
         XCTAssertEqual(preferences.islandSections, IslandSection.defaults)
@@ -275,8 +277,9 @@ final class IslandDataTests: XCTestCase {
     }
 
     func testLimitCardsRespectVisibilityAndTodayHidesHiddenProviders() {
-        let suiteName = "NetraTests.IslandData.\(UUID().uuidString)"
+        let suiteName = "NetraTests.IslandData"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferences(defaults: defaults)
         let now = Date.now
@@ -296,8 +299,9 @@ final class IslandDataTests: XCTestCase {
     }
 
     func testMissingClaudeReasonOnlyWhenUsedWithoutCard() {
-        let suiteName = "NetraTests.IslandMissing.\(UUID().uuidString)"
+        let suiteName = "NetraTests.IslandMissing"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferences(defaults: defaults)
         let now = Date.now

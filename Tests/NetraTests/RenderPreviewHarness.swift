@@ -16,8 +16,9 @@ final class RenderPreviewHarness: XCTestCase {
             atPath: outputDir, withIntermediateDirectories: true
         )
 
-        let suiteName = "NetraTests.RenderPreview.\(UUID().uuidString)"
+        let suiteName = "NetraTests.RenderPreview"
         let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let preferences = AppPreferences(defaults: defaults)
         // Exercise the opt-in provider surfaces in the render.

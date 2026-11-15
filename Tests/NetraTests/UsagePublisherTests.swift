@@ -87,8 +87,9 @@ final class UsagePublisherTests: XCTestCase {
     /// Fresh defaults, clock, and stub script (also between table rows).
     private func reset() {
         if defaults != nil { defaults.removePersistentDomain(forName: suiteName) }
-        suiteName = "NetraTests.UsagePublisher.\(UUID().uuidString)"
+        suiteName = "NetraTests.UsagePublisher"
         defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
         clock = TestClock()
         PublishStubProtocol.script([])
     }

@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class AppPreferencesTests: XCTestCase {
     private func isolatedDefaults() -> (UserDefaults, String) {
-        let suiteName = "NetraTests.AppPreferences.\(UUID().uuidString)"
+        let suiteName = "NetraTests.AppPreferences"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return (defaults, suiteName)
@@ -449,7 +449,7 @@ final class UsageAlertControllerTests: XCTestCase {
     }
 
     private func isolatedDefaults() -> (UserDefaults, String) {
-        let suiteName = "NetraTests.UsageAlerts.\(UUID().uuidString)"
+        let suiteName = "NetraTests.UsageAlerts"
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return (defaults, suiteName)
