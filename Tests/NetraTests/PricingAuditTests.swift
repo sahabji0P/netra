@@ -43,6 +43,21 @@ final class PricingAuditTests: XCTestCase {
         XCTAssertEqual(finding.ratio, 0.25, accuracy: 0.000_1)
     }
 
+    /// A recent scan reports only the last few days of a month. The same
+    /// mispriced model then falls under the audit's minimum and its finding
+    /// disappears, so the audit must only run on reports of whole months.
+    func testAFindingVanishesFromAPartialMonthSoOnlyCompleteScansAreAudited() {
+        // The whole month: list $6.00, reported $1.50.
+        let month = report(["hermes": [model("gpt-5.6-sol", cost: 1.5)]])
+        // Three days of it: list $0.60, reported $0.15. Same ratio, below the minimum.
+        let slice = report(["hermes": [model("gpt-5.6-sol", cost: 0.15, input: 100_000, output: 10_000)]])
+        XCTAssertEqual(PricingAudit.findings(in: month, prices: ["gpt-5.6-sol": sol]).count, 1)
+        XCTAssertTrue(PricingAudit.findings(in: slice, prices: ["gpt-5.6-sol": sol]).isEmpty)
+
+        XCTAssertTrue(UsageScan.complete.coversWholeMonths)
+        XCTAssertFalse(UsageScan.recent.coversWholeMonths)
+    }
+
     func testAcceptsPriorityTierAndIgnoresNoise() {
         let findings = PricingAudit.findings(in: report([
             // Fast mode bills 2× list: legitimate, not a finding.

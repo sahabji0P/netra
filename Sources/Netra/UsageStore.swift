@@ -140,9 +140,7 @@ final class UsageStore {
                     scan = .complete
                     report = try await client.fetchReport(scan)
                 }
-                // A recent scan holds only a few days of each month; auditing
-                // those would drop and re-raise findings for earlier usage.
-                if scan == .complete { auditPricing(of: report) }
+                if scan.coversWholeMonths { auditPricing(of: report) }
                 // Block and quota data are bonuses — their failure must not fail the refresh.
                 // Keep the last observed values when a secondary reader fails;
                 // a successful "no active block" result still clears that value.
