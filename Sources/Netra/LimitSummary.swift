@@ -30,15 +30,6 @@ struct ProviderLimits: Identifiable, Equatable, Sendable {
         windows.max { $0.usedPercent < $1.usedPercent }
     }
 
-    /// Windows used this little say nothing a single line cannot.
-    static let quietUsedPercent: Double = 10
-
-    /// True when the provider has several windows and every one is barely
-    /// used: the popover then shows the most-used one in place of them all.
-    var isQuiet: Bool {
-        !isEstimate && windows.count > 1 && windows.allSatisfy { $0.usedPercent <= Self.quietUsedPercent }
-    }
-
     /// Short window on top, the most-used remaining window below.
     var iconWindows: (top: QuotaWindow, bottom: QuotaWindow?)? {
         guard let top = windows.min(by: {

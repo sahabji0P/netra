@@ -54,9 +54,7 @@ full dashboard; **Settings** opens in that same window.
 The popover leads with your **subscription limits** — one section per
 provider with one line per window: its bar, how much is used, and when it
 resets. A pace line appears under a window only when it needs attention (the
-limit is reached, or you would run out before the reset). A provider whose
-windows are all under 10% used shows a single line; click it to see each
-one. Below that is the
+limit is reached, or you would run out before the reset). Below that is the
 period's API-equivalent cost and activity chart, then a single row of actions
 (Keep Awake, dashboard, Settings, refresh, Lock & Sleep, quit).
 

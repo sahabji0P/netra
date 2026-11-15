@@ -59,21 +59,6 @@ final class LimitSummaryTests: XCTestCase {
         XCTAssertFalse(LimitText.needsAttention(nil))
     }
 
-    func testProviderIsQuietOnlyWhenEveryOneOfSeveralWindowsIsBarelyUsed() {
-        func limits(_ used: [Double], isEstimate: Bool = false) -> ProviderLimits {
-            ProviderLimits(
-                agent: "cursor", source: "Reported by Cursor", observedAt: nil,
-                windows: used.enumerated().map { QuotaWindow(label: "w\($0.offset)", usedPercent: $0.element) },
-                isEstimate: isEstimate
-            )
-        }
-        XCTAssertTrue(limits([1, 0, 3]).isQuiet)
-        XCTAssertEqual(limits([1, 0, 3]).mostConstrained?.usedPercent, 3)
-        XCTAssertFalse(limits([1, 0, 38]).isQuiet, "one window in real use shows them all")
-        XCTAssertFalse(limits([2]).isQuiet, "a single window is already one line")
-        XCTAssertFalse(limits([1, 2], isEstimate: true).isQuiet)
-    }
-
     func testCountdownAndClockResets() {
         XCTAssertEqual(LimitText.reset(now.addingTimeInterval(2 * 86400 + 4 * 3600), style: .countdown, now: now), "Resets in 2d 4h")
         XCTAssertEqual(LimitText.reset(now.addingTimeInterval(3 * 3600 + 12 * 60), style: .countdown, now: now), "Resets in 3h 12m")

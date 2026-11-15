@@ -105,7 +105,9 @@ extension MenuView {
                 Spacer(minLength: 8)
                 accountSwitcher(for: limits.agent)
             }
-            limitRows(limits)
+            ForEach(limits.windows, id: \.self) { window in
+                compactRow(window, limits: limits)
+            }
             if limits.bankedResetCount > 0 {
                 bankedResets(limits)
             }
@@ -140,28 +142,9 @@ extension MenuView {
         .accessibilityHint("Shows this provider's usage by model")
     }
 
-    /// One line per window. A provider whose windows are all barely used
-    /// shows only its most-used one until it is clicked open.
-    @ViewBuilder
-    private func limitRows(_ limits: ProviderLimits) -> some View {
-        if limits.isQuiet, !expandedQuietProviders.contains(limits.agent), let window = limits.mostConstrained {
-            Button {
-                expandedQuietProviders.insert(limits.agent)
-            } label: {
-                compactRow(window, limits: limits, title: "All \(limits.windows.count) limits")
-            }
-            .buttonStyle(.plain)
-            .help("Every \(AgentPalette.shortName(limits.agent)) limit is under \(Int(ProviderLimits.quietUsedPercent))% used. Click to show each one.")
-        } else {
-            ForEach(limits.windows, id: \.self) { window in
-                compactRow(window, limits: limits)
-            }
-        }
-    }
-
-    private func compactRow(_ window: QuotaWindow, limits: ProviderLimits, title: String? = nil) -> some View {
+    private func compactRow(_ window: QuotaWindow, limits: ProviderLimits) -> some View {
         CompactLimitRow(
-            window: window, agent: limits.agent, title: title, isEstimate: limits.isEstimate,
+            window: window, agent: limits.agent, isEstimate: limits.isEstimate,
             showRemaining: preferences.barsShowRemaining,
             showsPace: preferences.showsPace,
             resetStyle: preferences.resetTimeStyle
@@ -226,8 +209,6 @@ extension MenuView {
 struct CompactLimitRow: View {
     var window: QuotaWindow
     var agent: String
-    /// Replaces the window's own name, e.g. "All 3 limits".
-    var title: String? = nil
     var isEstimate = false
     var showRemaining: Bool
     var showsPace: Bool
@@ -239,7 +220,7 @@ struct CompactLimitRow: View {
         let pace = showsPace && !isEstimate ? LimitText.pace(window) : nil
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
-                Text(title ?? LimitText.shortTitle(window.label))
+                Text(LimitText.shortTitle(window.label))
                     .font(.system(size: 11.5, weight: .medium))
                     .lineLimit(1)
                     .frame(width: 74, alignment: .leading)
@@ -280,9 +261,8 @@ struct CompactLimitRow: View {
                     .padding(.leading, 82)
             }
         }
-        .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title ?? LimitText.title(window.label))
+        .accessibilityLabel(LimitText.title(window.label))
         .accessibilityValue(accessibilityValue(remaining: remaining, pace: pace))
     }
 
