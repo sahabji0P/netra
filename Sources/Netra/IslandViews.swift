@@ -600,7 +600,8 @@ struct IslandVersion: Equatable, Sendable {
 }
 
 /// "v1.3.0" in grey; once a newer release exists it turns orange, reads
-/// "Update 1.3.1", and opens the release page (updates install via Homebrew).
+/// "Update 1.3.1", and opens the release page (updates install by re-running
+/// install.sh, or through Homebrew).
 struct IslandVersionPill: View {
     var version: IslandVersion
 
@@ -625,7 +626,7 @@ struct IslandVersionPill: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .help("Netra \(available) is out (you have \(version.current)). Update with brew upgrade netra.")
+            .help("Netra \(available) is out (you have \(version.current)). Re-run the install command to update (Homebrew: brew upgrade --cask netra).")
         } else {
             Text("v\(version.current)")
                 .font(.system(size: 10.5, weight: .semibold))
