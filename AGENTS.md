@@ -58,7 +58,8 @@ instructions.
   external formats. `fixtures/` at the root contains exploratory captures and
   benchmark notes rather than test resources.
 - `run.sh` builds, signs, and restarts a development build. `scripts/` assembles
-  and publishes the distributable app. `packaging/` contains shipped assets.
+  and publishes the distributable app, and holds the ccusage version check
+  and the git hook that runs it. `packaging/` contains shipped assets.
 
 ## Architecture and implementation rules
 
@@ -156,8 +157,11 @@ Run commands from the repository root.
 - `swift test` — run the full XCTest suite; required for source or test changes.
 - `swift test --filter ContractTests` — focused external-contract tests.
 - `swift test --filter PricingOverridesTests` — focused pricing tests.
-- `zsh -n run.sh scripts/build-app.sh scripts/release.sh` — syntax-check shell
+- `zsh -n run.sh scripts/*.sh scripts/git-hooks/pre-push` — syntax-check shell
   scripts after editing them.
+- `scripts/check-ccusage.sh` — fail when `ccusage-bin` is behind the latest
+  ccusage on npm. The `pre-push` hook (`git config core.hooksPath
+  scripts/git-hooks`) runs it for pushes to `master`; `release.sh` runs it too.
 - `git diff --check` — check every change for whitespace errors.
 - `NETRA_RENDER_DIR=/tmp/netra-previews swift test --filter AccountsRenderPreview`
   — render the account switcher (popover, Accounts page, Subscriptions) with

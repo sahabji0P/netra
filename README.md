@@ -285,6 +285,7 @@ The app shows a quiet notice in its footer when a newer release exists.
 ./run.sh          # debug build + (re)start in the menu bar
 pkill -f Netra    # stop
 swift test        # contract tests against captured fixtures
+git config core.hooksPath scripts/git-hooks   # once per clone: check ccusage before pushing master
 ```
 
 ## Release (maintainer)
@@ -298,11 +299,13 @@ scripts/release.sh 0.1.2      # zip → GitHub Release → bump Homebrew cask
 Developer membership); otherwise it releases un-notarized and users must clear
 quarantine with the `xattr` command above.
 
-Before publishing, `release.sh` checks npm for a newer
-`@ccusage/ccusage-darwin-arm64` and stops if `ccusage-bin` is behind. Review
-the ccusage changelog, replace the binary, and run `swift test` (which runs the
-pinned binary against synthetic logs in `PinnedCCUsageTests`) — or set
-`NETRA_ALLOW_OLD_CCUSAGE=1` to ship on the pinned version deliberately.
+`scripts/check-ccusage.sh` compares `ccusage-bin` with the latest
+`@ccusage/ccusage-darwin-arm64` on npm and fails when it is behind. It runs
+before every release and, through the `pre-push` hook, before every push to
+`master`. To upgrade, review the ccusage changelog, replace the binary, and
+run `swift test` (which runs the pinned binary against synthetic logs in
+`PinnedCCUsageTests`), or set `NETRA_ALLOW_OLD_CCUSAGE=1` to proceed on the
+pinned version deliberately.
 
 ## Layout
 
