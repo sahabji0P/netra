@@ -1,0 +1,48 @@
+{
+  "fetchedAt": 816461773.5,
+  "unknownTopLevelBlock": { "ignored": true },
+  "daily": [],
+  "weekly": [],
+  "monthly": [],
+  "activeBlock": {
+    "start": 816454800, "end": 816472800, "tokens": 1000, "cost": 2.5,
+    "projectedCost": 6, "percentUsed": 1223
+  },
+  "claudeQuota": {
+    "windows": [
+      { "label": "5h", "usedPercent": 57, "resetsAt": 816474599.5, "durationSeconds": 18000 },
+      { "label": "weekly", "usedPercent": 51, "resetsAt": 816487200, "durationSeconds": 604800 },
+      { "label": "weekly · Test", "usedPercent": 83.5, "resetsAt": 816487200, "durationSeconds": 604800 },
+      { "label": "expired", "usedPercent": 99, "resetsAt": 816000000, "durationSeconds": 18000 }
+    ],
+    "fetchedAt": 816461773,
+    "accountKey": "claude:synthetic-account",
+    "source": "oauth",
+    "extraUsage": { "isEnabled": false, "disabledReason": "out_of_credits", "everEnabled": true },
+    "subscriptionType": "team"
+  },
+  "codexQuota": {
+    "windows": [
+      { "label": "monthly", "usedPercent": 6, "resetsAt": 817916084, "durationSeconds": 2592000 },
+      { "label": "undated", "usedPercent": 10 }
+    ],
+    "planType": "go",
+    "observedAt": 816461830,
+    "source": "someFutureSource",
+    "resetCreditsAvailable": 4,
+    "resetCredits": [
+      { "title": "Full reset", "grantedAt": 815160542, "expiresAt": 817845948 },
+      { "title": "Full reset", "grantedAt": 815160542, "expiresAt": 817752542 },
+      { "title": "Expired reset", "expiresAt": 816000000 }
+    ]
+  },
+  "cursorQuota": {
+    "windows": [
+      { "label": "included usage", "usedPercent": 1.5, "resetsAt": 818946736.063, "durationSeconds": 2592000 },
+      { "label": "Grok Bot", "usedPercent": 40, "resetsAt": 816900000, "durationSeconds": 604800 }
+    ],
+    "planType": "Free",
+    "fetchedAt": 816461832.2,
+    "models": [], "inputTokens": 0, "outputTokens": 0, "cacheCreationTokens": 0, "cacheReadTokens": 0
+  }
+}

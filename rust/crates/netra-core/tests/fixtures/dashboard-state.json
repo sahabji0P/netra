@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "writtenAt": "2026-11-16T05:40:00.250Z",
+  "app": {
+    "version": "1.5.0",
+    "pid": 4242,
+    "refreshing": false,
+    "lastError": null,
+    "launchAtLogin": true,
+    "launchAtLoginAvailable": true,
+    "notifications": "allowed",
+    "claudeKeychainNeedsApproval": false,
+    "updateAvailable": null,
+    "website": { "tokenSaved": false, "publishing": false, "status": "Never published", "tokenError": null }
+  },
+  "preferences": {
+    "menuBarIcon": "ring",
+    "menuBarItems": ["todayCost", "limitPercent"],
+    "menuBarStyle": "pill",
+    "menuBarTint": "mono",
+    "menuBarLimitSource": "closest",
+    "menuBarCompact": false,
+    "showsLimits": true,
+    "showsProviderBreakdown": true,
+    "showsActivityChart": true,
+    "showsKeepAwake": true,
+    "hiddenMenuProviders": ["gemini"],
+    "defaultPeriod": "today",
+    "barsShowRemaining": false,
+    "resetTimeStyle": "countdown",
+    "showsPace": true,
+    "limitProviderOrder": ["codex", "claude", "cursor", "cursor-grok-bot"],
+    "claudeQuotaEnabled": true,
+    "cursorUsageEnabled": false,
+    "confettiOnReset": true,
+    "notchIslandEnabled": true,
+    "dailyTokenAlertEnabled": false,
+    "dailyTokenAlertThreshold": 1000000,
+    "providerLimitAlertEnabled": true,
+    "providerLimitAlertThreshold": 80,
+    "websitePublishEnabled": false,
+    "websiteEndpoint": "",
+    "aKeyFromANewerNetra": 7
+  },
+  "periods": [
+    { "id": "today", "title": "Today" },
+    { "id": "week", "title": "Week" },
+    { "id": "month", "title": "Month" }
+  ],
+  "accounts": {
+    "providers": [
+      {
+        "provider": "claude",
+        "managing": true,
+        "live": { "email": "ada@example.com", "displayName": "Ada Example", "organization": "Example Labs", "plan": "Team" },
+        "liveIsSaved": true,
+        "switching": false,
+        "pendingSignIn": false,
+        "note": null,
+        "accounts": [
+          {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "title": "Work",
+            "email": "ada@example.com",
+            "plan": "Team",
+            "organization": "Example Labs",
+            "initials": "W",
+            "active": true,
+            "attention": null,
+            "lastActiveAt": "2026-11-16T05:30:00Z",
+            "limits": {
+              "observedAt": "2026-11-16T05:39:00.000Z",
+              "isLive": true,
+              "windows": [
+                { "label": "5h", "usedPercent": 34.0, "resetsAt": "2026-11-16T08:00:00.000Z", "durationSeconds": 18000 },
+                { "label": "weekly", "usedPercent": 12.0, "resetsAt": "2026-11-22T02:00:00.000Z", "durationSeconds": 604800 }
+              ]
+            }
+          },
+          {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "title": "Personal",
+            "email": "ada.personal@example.com",
+            "plan": "Max",
+            "organization": null,
+            "initials": "P",
+            "active": false,
+            "attention": null,
+            "lastActiveAt": "2026-11-14T10:00:00.000Z",
+            "limits": {
+              "observedAt": "2026-11-14T10:00:00.000Z",
+              "isLive": false,
+              "windows": [
+                { "label": "weekly", "usedPercent": 91.0, "resetsAt": "2026-11-20T02:00:00.000Z", "durationSeconds": 604800 }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "provider": "codex",
+        "managing": false,
+        "live": { "email": "ada@example.com", "displayName": null, "organization": null, "plan": "Plus" },
+        "liveIsSaved": false,
+        "switching": false,
+        "pendingSignIn": false,
+        "note": null,
+        "accounts": []
+      }
+    ],
+    "notice": null
+  },
+  "navigate": { "page": "subscriptions", "nonce": 3 },
+  "results": [
+    { "id": "abc-1", "command": "history.import", "ok": true, "message": "Added 12 days, updated 3.", "at": "2026-11-16T05:39:58.000Z" }
+  ]
+}

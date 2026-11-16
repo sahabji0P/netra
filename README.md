@@ -64,28 +64,53 @@ this week, and this month, its token mix, and a per-model split (tokens and
 cost) for the selected period; it hides when the pointer leaves. Clicking the
 card toggles it.
 
-The dashboard window has two overview pages and five settings pages in its
-sidebar. **Usage** shows headline numbers with the change against the previous
-equal period and sparklines, the stacked activity chart, a provider donut
-(hover a provider for its models), token composition, and a model/day table
-you can filter by provider. **Subscriptions** shows every provider's limit
-windows, pace, and provider-specific detail (Cursor's billing cycle per model,
-Codex reset credits); its tabs switch between **All** providers and one
-provider at a time, where every account you manage for it gets a full card
-with its last-seen limits and a switch button. Both always cover **every** provider found in your logs.
-Settings are grouped into **Menu Bar & Popover**, **Limits**, **Providers**,
-**Notifications**, and **General** (which includes the opt-in **Website**
-publishing described below). The menu-bar popover is the curated view:
-**Providers** lets you toggle which providers appear there (hidden providers
-are removed from the popover's totals too, so its numbers stay consistent).
+The main window is its own app (built with GPUI) that opens from the popover
+and shows in the Dock while it is open; closing it leaves Netra running in
+the menu bar. Its sidebar has three overview pages and five settings pages.
+**Usage** shows headline numbers with the change against the previous equal
+period and sparklines, the stacked activity chart, each provider's share
+(click one to filter), token composition, a model table, and a calendar of
+the last 30 weeks shaded by cost. **Subscriptions** shows every provider's
+limit windows, resets, pace, and provider-specific detail (Codex banked
+resets, Claude extra usage). **Accounts** lists the Claude Code and Codex
+accounts you manage, with each parked account's last-seen limits and a
+switch button. These pages always cover **every** provider found in your logs.
+Settings are grouped into **Menu Bar**, **Limits**, **Providers**,
+**Notifications**, and **General** (which includes exporting and importing
+your history, and the opt-in **Website** publishing described below). The
+menu-bar popover is the curated view: **Providers** lets you toggle which
+providers appear there (hidden providers are removed from the popover's
+totals too, so its numbers stay consistent).
+
+The window only displays and asks: every change is carried out by the
+menu-bar app, which must be running for Settings and Accounts to work. A
+nickname, the website endpoint, and its token are typed into a prompt the
+menu-bar app shows.
 
 **Limits** personalizes the limit cards, with a live preview: bars that show
 used or remaining, countdown or date-and-time resets, the pace line, and the
-order of provider cards. **Menu Bar & Popover** picks the menu-bar label —
-including a **Limit bars** icon: two small bars (short window and the
-most-used longer window) for whichever provider is closest to a limit, with a
-dot while Keep Awake is on — which popover sections show, and the period the
-popover opens on.
+order of provider cards.
+
+**Menu Bar** builds the menu-bar label from parts, with a live preview on a
+light and a dark menu bar:
+
+- **Icon**: Netra's eye, two limit bars (short window and weekly), a gauge
+  ring, or none.
+- **Shows**: any of today's cost, today's tokens, this week's or month's
+  cost, the limit percent, the time to its reset, and the session or weekly
+  percent, in the order you choose.
+- **Style**: plain text, a filled pill, or an outlined pill.
+- **Color**: follow the menu bar, the provider's color, or green, amber, and
+  red as a limit fills.
+- **Limit source**: whichever provider is closest to a limit, or one you pick.
+- **Compact**: smaller text for a crowded menu bar.
+
+The limit percent follows the Limits page's used-or-left choice. A dot still
+marks Keep Awake. The same page picks which popover sections
+show and the period the popover opens on. The label you had before this
+version carries over. One difference: if you used the highest-usage percent
+together with bars that show what is left, the percent now also reads as
+percent left.
 
 **Claude** and **Codex** limits appear whenever a limit source is available.
 If Claude was used this week but no limit source is available (Claude Code
@@ -179,6 +204,12 @@ nothing else, in `~/Library/Application Support/Netra/usage-history.json`.
   deleted before that cannot be recovered. To make Claude Code keep its
   transcripts longer in the meantime, set `cleanupPeriodDays` in
   `~/.claude/settings.json`.
+- **Moving Macs or keeping a backup**: Settings → General → **Export…** saves
+  a copy of the history; **Import…** on another Mac (or after a reinstall)
+  adds its days. A day you already have is only replaced by a fuller one, so
+  importing the same file twice changes nothing and an old file can never
+  lower a total. Usage from two Macs on the same day is not added together:
+  the larger entry is kept. A file that cannot be read is refused.
 - Days are keyed in this Mac's time zone. After a time-zone change, the few
   days being re-read may briefly count a few hours twice.
 
@@ -340,9 +371,19 @@ Settings → General → Login Items, remove it there. Homebrew installs:
 ## Develop
 
 ```sh
-./run.sh          # debug build + (re)start in the menu bar
+./run.sh          # build both halves + (re)start in the menu bar
 pkill -f Netra    # stop
 swift test        # contract tests against captured fixtures
+(cd rust && cargo run -p netra-dashboard)   # the main window alone, over Netra's saved files
+scripts/make-icon.sh                        # redraw packaging/AppIcon.icns
+```
+
+Building needs Rust as well as Swift: `scripts/build-app.sh` builds the GPUI
+window with `cargo` and nests it in the app, and fails without it.
+`NETRA_DASHBOARD_BIN=/path/to/netra-dashboard` points a `swift run` of the
+menu-bar app at a window binary outside the bundle.
+
+```sh
 git config core.hooksPath scripts/git-hooks   # once per clone: check ccusage before pushing master
 ```
 
@@ -378,16 +419,20 @@ pinned version deliberately.
   - `UsageLedger.swift` — the recorded per-day usage history and the rule for how much of the logs each refresh reads
   - `CursorUsageEvents.swift` — Cursor usage-event parsing, paged fetch, and the incremental on-disk store
   - `CursorUsageFetcher.swift` — Cursor cycle tokens, API-rate value, and quota windows
-  - `Dashboard*.swift` — full Usage and Settings window
+  - `DashboardBridge.swift` / `DashboardState.swift` / `DashboardCommand.swift` / `DashboardLauncher.swift` — the bridge to the main window: the state file, the command inbox, and opening it
+  - `MenuBarLabel.swift` — draws the customizable menu-bar label
   - `AppPreferences.swift` / `UsageAlerts.swift` — persisted display choices and threshold notifications
   - `AwakeController.swift` — IOKit sleep assertion (manual/timed), lock & sleep
   - `MenuView.swift` / `LimitsViews.swift` / `LimitSummary.swift` — the popover UI and limit/pace text rules
   - `Account*.swift`, `ClaudeAccountSession.swift`, `CodexAccountSession.swift` — multi-account roster, Keychain vault, and the Claude Code / Codex sign-in swap
-  - `AccountsViews.swift` / `DashboardAccountsView.swift` — account switcher in the popover and the Accounts settings page
+  - `AccountsViews.swift` — account switcher in the popover
 - `install.sh` — curl installer and `--uninstall` (served from `master` via raw.githubusercontent.com)
 - `ccusage-bin` — pinned ccusage 20.0.51 native arm64 binary (from npm `@ccusage/ccusage-darwin-arm64`)
 - `VERSION` — next app-bundle version used by local builds (publishing remains explicit)
 - `fixtures/` — captured real JSON output + benchmark notes
+- `rust/` — the main window: a Rust usage core and the GPUI app over it, nested in `Netra.app` by `scripts/build-app.sh` (see `rust/README.md`)
+- `docs/dashboard-bridge.md` — how the window and the menu-bar app talk: a state file one way, command files the other
+- `scripts/make-icon.swift` — draws the app icon
 
 ## Status
 

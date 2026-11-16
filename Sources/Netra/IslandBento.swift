@@ -104,12 +104,9 @@ struct IslandCostModel: Equatable {
 struct IslandExpandedView: View {
     var store: UsageStore
     var preferences: AppPreferences
-    /// Opens a dashboard page. The integration supplies it; without one the
-    /// view opens the dashboard window itself, as the popover does.
+    /// Opens a page of the main window. The integration supplies it;
+    /// without one the view asks the launcher itself, as the popover does.
     var openDashboard: ((DashboardSection) -> Void)? = nil
-    var dashboardNavigation: DashboardNavigation? = nil
-
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         IslandExpandedContent(
@@ -121,9 +118,7 @@ struct IslandExpandedView: View {
 
     private func open(_ section: DashboardSection) {
         if let openDashboard { return openDashboard(section) }
-        dashboardNavigation?.selection = section
-        openWindow(id: "dashboard")
-        NSApp.activate(ignoringOtherApps: true)
+        DashboardLauncher.shared.open(section)
     }
 }
 

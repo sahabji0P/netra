@@ -33,7 +33,7 @@ final class AccountsRenderPreview: XCTestCase {
         let accounts = Self.previewAccounts(withNotice: true)
         let menu = MenuView(
             store: store, awake: AwakeController(), updates: UpdateChecker(),
-            preferences: preferences, dashboardNavigation: DashboardNavigation(),
+            preferences: preferences,
             accounts: accounts, rendersFullHeight: true
         )
         render(menu, name: "accounts-menu", outputDir: outputDir)
@@ -43,34 +43,6 @@ final class AccountsRenderPreview: XCTestCase {
                 name: "accounts-switcher-\(provider.rawValue)", outputDir: outputDir
             )
         }
-
-        render(
-            DashboardAccountsView(accounts: Self.previewAccounts(withNotice: false), store: store, preferences: preferences)
-                .frame(width: 860, height: 1180),
-            name: "accounts-settings", outputDir: outputDir
-        )
-        let empty = AccountStore(preview: AccountRoster(), live: Self.live)
-        render(
-            DashboardAccountsView(accounts: empty, store: store, preferences: preferences)
-                .frame(width: 860, height: 900),
-            name: "accounts-settings-empty", outputDir: outputDir
-        )
-        render(
-            DashboardSubscriptionsView(
-                store: store, preferences: preferences,
-                navigation: DashboardNavigation(selection: .subscriptions), accounts: accounts
-            )
-            .frame(width: 1100, height: 1000),
-            name: "accounts-subscriptions", outputDir: outputDir
-        )
-        render(
-            DashboardSubscriptionsView(
-                store: store, preferences: preferences,
-                navigation: DashboardNavigation(selection: .subscriptions), accounts: accounts, focus: "claude"
-            )
-            .frame(width: 1100, height: 1000),
-            name: "accounts-subscriptions-claude", outputDir: outputDir
-        )
     }
 
     // MARK: Synthetic data

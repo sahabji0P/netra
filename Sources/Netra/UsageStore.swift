@@ -2,6 +2,14 @@ import Foundation
 import Observation
 
 private actor UsageSnapshotCache {
+    private let cacheURL: URL
+
+    init(url: URL? = nil) {
+        cacheURL = url ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Netra", isDirectory: true)
+            .appendingPathComponent("snapshot.json")
+    }
+
     func load() -> UsageSnapshot? {
         guard let data = try? Data(contentsOf: cacheURL) else { return nil }
         return try? JSONDecoder().decode(UsageSnapshot.self, from: data)
@@ -12,12 +20,6 @@ private actor UsageSnapshotCache {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         try? data.write(to: cacheURL, options: .atomic)
-    }
-
-    private var cacheURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Netra", isDirectory: true)
-            .appendingPathComponent("snapshot.json")
     }
 }
 
@@ -49,7 +51,7 @@ final class UsageStore {
     private let client = CCUsageClient()
     private let preferences: AppPreferences
     private let alerts: UsageAlertController
-    private let cache = UsageSnapshotCache()
+    private let cache: UsageSnapshotCache
     private let celebrations: ResetCelebrationStore
     private var refreshTask: Task<Void, Never>?
     private let staleAfter: TimeInterval = 60
@@ -96,9 +98,11 @@ final class UsageStore {
         ledger: UsageLedger = UsageLedger(),
         publisher: UsagePublisher? = nil,
         accounts: AccountStore? = nil,
+        snapshotCacheURL: URL? = nil,
         startsAutomatically: Bool = true
     ) {
         self.preferences = preferences
+        self.cache = UsageSnapshotCache(url: snapshotCacheURL)
         self.feedFile = feedFile
         self.ledger = ledger
         self.accounts = accounts
@@ -295,6 +299,29 @@ final class UsageStore {
         refreshTask = task
         await task.value
         refreshTask = nil
+    }
+
+    // MARK: History files
+
+    /// Writes a copy of the recorded usage history to `url`.
+    func exportHistory(to url: URL) async throws {
+        try await ledger.export(to: url)
+    }
+
+    /// Merges a history file into the recorded history and, when a day
+    /// changed, shows the new totals at once. The snapshot is rebuilt from
+    /// the recorded days without scanning any logs; its freshness, limits
+    /// and block stay as they were, and no alert or celebration fires.
+    func importHistory(from url: URL) async throws -> UsageHistory.ImportSummary {
+        // A refresh that already read the history would otherwise publish
+        // the pre-import totals after this rebuild.
+        await refreshTask?.value
+        let (summary, days) = try await ledger.importHistory(from: url)
+        guard summary.changedAnything, let current = snapshot else { return summary }
+        let rebuilt = await Task.detached { current.replacingDays(days) }.value
+        snapshot = rebuilt
+        await cache.save(rebuilt)
+        return summary
     }
 
     /// Writes the public usage feed for a successful snapshot and, when

@@ -1,0 +1,11 @@
+[package]
+name = "netra-core"
+description = "Netra's usage model: the recorded history, snapshot limits, and the sums every view shows. No UI, no macOS APIs."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true

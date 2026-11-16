@@ -8,6 +8,12 @@ import SwiftUI
 /// marks are always paired with a text label, never color alone.
 enum AgentPalette {
     static func color(for agent: String) -> Color {
+        Color(nsColor: nsColor(for: agent))
+    }
+
+    /// The same identity color as an appearance-aware `NSColor`, for AppKit
+    /// drawing such as the menu-bar label.
+    static func nsColor(for agent: String) -> NSColor {
         switch agent.lowercased() {
         case "claude": dynamic(light: 0xC65D33, dark: 0xD4653A)   // terracotta
         case "codex": dynamic(light: 0x2A78D6, dark: 0x3987E5)    // blue
@@ -18,15 +24,23 @@ enum AgentPalette {
         case "cursor": dynamic(light: 0x4A3AA7, dark: 0x9085E9)   // violet
         case "cursor-grok-bot": dynamic(light: 0x8C80D8, dark: 0xC4BDF4) // pale violet: Cursor's Grok Bot
         case "hermes": dynamic(light: 0xE34948, dark: 0xE66767)   // red
-        default: Color(nsColor: .systemGray)
+        default: .systemGray
         }
     }
 
-    private static func dynamic(light: Int, dark: Int) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+    /// Limit status colors for the menu-bar label: fine, getting close
+    /// (from 75%), nearly out (from 90%).
+    static func statusNSColor(usedPercent: Double) -> NSColor {
+        if usedPercent >= 90 { return NSColor(rgb: 0xD03B3B) }
+        if usedPercent >= 75 { return NSColor(rgb: 0xE08A00) }
+        return NSColor(rgb: 0x2E9E4F)
+    }
+
+    private static func dynamic(light: Int, dark: Int) -> NSColor {
+        NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             return NSColor(rgb: isDark ? dark : light)
-        })
+        }
     }
 
     static func displayName(_ agent: String) -> String {

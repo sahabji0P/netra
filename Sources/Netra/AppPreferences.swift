@@ -55,6 +55,12 @@ enum ResetTimeStyle: String, CaseIterable, Identifiable, Sendable {
 final class AppPreferences {
     private enum Key {
         static let menuBarDisplayMode = "preferences.menuBarDisplayMode"
+        static let menuBarIcon = "preferences.menuBar.icon"
+        static let menuBarItems = "preferences.menuBar.items"
+        static let menuBarStyle = "preferences.menuBar.style"
+        static let menuBarTint = "preferences.menuBar.tint"
+        static let menuBarLimitSource = "preferences.menuBar.limitSource"
+        static let menuBarCompact = "preferences.menuBar.compact"
         static let showsLimits = "preferences.popover.showsLimits"
         static let showsProviderBreakdown = "preferences.popover.showsProviderBreakdown"
         static let showsActivityChart = "preferences.popover.showsActivityChart"
@@ -81,8 +87,49 @@ final class AppPreferences {
 
     private(set) var notificationAuthorizationState: NotificationAuthorizationState = .checking
 
+    /// The single label mode from before the label became customizable.
+    /// Only read to seed the new label keys while they are absent; setting
+    /// it applies its mapping to the new keys.
     var menuBarDisplayMode: MenuBarDisplayMode {
-        didSet { defaults.set(menuBarDisplayMode.rawValue, forKey: Key.menuBarDisplayMode) }
+        didSet {
+            defaults.set(menuBarDisplayMode.rawValue, forKey: Key.menuBarDisplayMode)
+            menuBarIcon = menuBarDisplayMode.labelIcon
+            menuBarItems = menuBarDisplayMode.labelItems
+        }
+    }
+    var menuBarIcon: MenuBarIconKind {
+        didSet { defaults.set(menuBarIcon.rawValue, forKey: Key.menuBarIcon) }
+    }
+    /// Ordered values shown after the icon; may be empty.
+    var menuBarItems: [MenuBarItem] {
+        didSet { defaults.set(menuBarItems.map(\.rawValue), forKey: Key.menuBarItems) }
+    }
+    var menuBarStyle: MenuBarStyle {
+        didSet { defaults.set(menuBarStyle.rawValue, forKey: Key.menuBarStyle) }
+    }
+    var menuBarTint: MenuBarTint {
+        didSet { defaults.set(menuBarTint.rawValue, forKey: Key.menuBarTint) }
+    }
+    /// `closest`, or the limit provider whose windows the label reports.
+    var menuBarLimitSource: String {
+        didSet { defaults.set(menuBarLimitSource, forKey: Key.menuBarLimitSource) }
+    }
+    var menuBarCompact: Bool {
+        didSet { defaults.set(menuBarCompact, forKey: Key.menuBarCompact) }
+    }
+
+    /// Every label setting as one value, for the renderer.
+    var menuBarLabelSettings: MenuBarLabelSettings {
+        MenuBarLabelSettings(
+            icon: menuBarIcon, items: menuBarItems, style: menuBarStyle, tint: menuBarTint,
+            limitSource: menuBarLimitSource, compact: menuBarCompact,
+            barsShowRemaining: barsShowRemaining, hiddenProviders: hiddenMenuProviders,
+            limitOrder: orderedLimitProviders
+        )
+    }
+
+    nonisolated static func isValidLimitSource(_ source: String) -> Bool {
+        source == MenuBarLabelSettings.closestSource || limitProviders.contains(source)
     }
     var showsLimits: Bool {
         didSet { defaults.set(showsLimits, forKey: Key.showsLimits) }
@@ -206,8 +253,26 @@ final class AppPreferences {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        menuBarDisplayMode = defaults.string(forKey: Key.menuBarDisplayMode)
+        let legacyMode = defaults.string(forKey: Key.menuBarDisplayMode)
             .flatMap(MenuBarDisplayMode.init(rawValue:)) ?? .todayCost
+        menuBarDisplayMode = legacyMode
+        // The new label keys win once written; until then the old mode
+        // decides, so an upgrade shows what the user chose before.
+        menuBarIcon = defaults.string(forKey: Key.menuBarIcon)
+            .flatMap(MenuBarIconKind.init(rawValue:)) ?? legacyMode.labelIcon
+        if let stored = defaults.object(forKey: Key.menuBarItems) as? [String] {
+            var seen = Set<MenuBarItem>()
+            menuBarItems = stored.compactMap(MenuBarItem.init(rawValue:)).filter { seen.insert($0).inserted }
+        } else {
+            menuBarItems = legacyMode.labelItems
+        }
+        menuBarStyle = defaults.string(forKey: Key.menuBarStyle)
+            .flatMap(MenuBarStyle.init(rawValue:)) ?? .plain
+        menuBarTint = defaults.string(forKey: Key.menuBarTint)
+            .flatMap(MenuBarTint.init(rawValue:)) ?? .mono
+        menuBarLimitSource = defaults.string(forKey: Key.menuBarLimitSource)
+            .flatMap { Self.isValidLimitSource($0) ? $0 : nil } ?? MenuBarLabelSettings.closestSource
+        menuBarCompact = defaults.object(forKey: Key.menuBarCompact) as? Bool ?? false
         showsLimits = defaults.object(forKey: Key.showsLimits) as? Bool ?? true
         showsProviderBreakdown = defaults.object(forKey: Key.showsProviderBreakdown) as? Bool ?? true
         showsActivityChart = defaults.object(forKey: Key.showsActivityChart) as? Bool ?? true

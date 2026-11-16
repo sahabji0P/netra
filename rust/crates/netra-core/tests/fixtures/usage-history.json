@@ -1,0 +1,46 @@
+{
+  "engine": "20.0.0-synthetic",
+  "completeScanAt": 816400000,
+  "days": {
+    "2026-11-13": [
+      {
+        "name": "claude", "cost": 10.5, "totalTokens": 1000, "inputTokens": 100, "outputTokens": 50,
+        "cacheCreationTokens": 50, "cacheReadTokens": 800,
+        "models": [
+          { "name": "claude-test-a", "cost": 8, "totalTokens": 700, "inputTokens": 60, "outputTokens": 40, "cacheCreationTokens": 40, "cacheReadTokens": 560 },
+          { "name": "claude-test-b-20251001", "cost": 2.5, "totalTokens": 300, "inputTokens": 40, "outputTokens": 10, "cacheCreationTokens": 10, "cacheReadTokens": 240 }
+        ]
+      }
+    ],
+    "2026-11-15": [
+      {
+        "name": "claude", "cost": 4, "totalTokens": 400, "inputTokens": 40, "outputTokens": 20,
+        "cacheCreationTokens": 20, "cacheReadTokens": 320,
+        "models": [
+          { "name": "claude-test-a", "cost": 4, "totalTokens": 400, "inputTokens": 40, "outputTokens": 20, "cacheCreationTokens": 20, "cacheReadTokens": 320 }
+        ]
+      },
+      {
+        "name": "codex", "cost": 6, "totalTokens": 650, "inputTokens": 300, "outputTokens": 50,
+        "cacheReadTokens": 200,
+        "models": [
+          { "name": "gpt-test", "cost": 6, "totalTokens": 650, "inputTokens": 300, "outputTokens": 50, "cacheReadTokens": 200 }
+        ]
+      },
+      {
+        "name": "other", "cost": 1, "totalTokens": 100, "inputTokens": 100, "outputTokens": 0,
+        "cacheCreationTokens": 0, "cacheReadTokens": 0,
+        "models": [
+          { "name": "gpt-test", "cost": 1, "totalTokens": 100, "inputTokens": 100, "outputTokens": 0, "cacheCreationTokens": 0, "cacheReadTokens": 0 }
+        ]
+      }
+    ],
+    "2026-11": [],
+    "2026-11-16": [
+      {
+        "name": "cursor", "cost": 0, "totalTokens": 900, "inputTokens": 500, "outputTokens": 400,
+        "cacheCreationTokens": 0, "cacheReadTokens": 0, "futureField": true, "models": []
+      }
+    ]
+  }
+}
