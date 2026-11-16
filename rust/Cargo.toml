@@ -7,7 +7,7 @@ members = ["crates/netra-core", "crates/netra-dashboard"]
 
 [workspace.package]
 edition = "2024"
-version = "2.0.0"
+version = "2.0.1"
 publish = false
 
 [workspace.dependencies]
