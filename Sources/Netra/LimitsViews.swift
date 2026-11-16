@@ -12,12 +12,7 @@ extension MenuView {
     var limitsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(limitCards) { limits in
-                VStack(alignment: .leading, spacing: 10) {
-                    limitCard(limits)
-                    // Outside the card so its buttons keep their own hover,
-                    // clicks, and accessibility.
-                    parkedAccountsStrip(for: limits.agent)
-                }
+                limitCard(limits)
             }
             if let reason = missingClaudeLimitsReason {
                 missingClaudeCard(reason)
@@ -63,7 +58,8 @@ extension MenuView {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1.5)
                     .background(.quaternary.opacity(0.6), in: Capsule())
-                accountChip(for: "claude")
+                Spacer(minLength: 8)
+                accountSwitcher(for: "claude")
             }
             Text(reason)
                 .font(.system(size: 11))
@@ -81,12 +77,11 @@ extension MenuView {
     }
 
     private func limitCard(_ limits: ProviderLimits) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .center, spacing: 6) {
                 Circle()
                     .fill(AgentPalette.color(for: limits.agent))
                     .frame(width: 8, height: 8)
-                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 Text(AgentPalette.shortName(limits.agent))
                     .font(.system(size: 13, weight: .semibold))
                     .fixedSize()
@@ -99,29 +94,22 @@ extension MenuView {
                         .background(.quaternary.opacity(0.6), in: Capsule())
                         .fixedSize()
                 }
-                accountChip(for: limits.agent)
-                Spacer(minLength: 8)
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    // The account chip can crowd the header; keep the age
-                    // and drop the source before anything truncates.
-                    ViewThatFits(in: .horizontal) {
-                        Text(freshness(limits, now: context.date))
-                        Text(limits.observedAt.map { Format.age(since: $0, now: context.date) } ?? limits.source)
-                            .help(limits.source)
-                    }
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    // How old the reading is, always; where it came from on hover.
+                    Text(limits.observedAt.map { Format.age(since: $0, now: context.date) } ?? limits.source)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .help(freshness(limits, now: context.date))
                 }
+                Spacer(minLength: 8)
+                accountSwitcher(for: limits.agent)
             }
             ForEach(limits.windows, id: \.self) { window in
-                limitWindow(window, agent: limits.agent, isEstimate: limits.isEstimate)
+                compactRow(window, limits: limits)
             }
-            if let banked = LimitText.bankedResets(limits) {
-                Label(banked, systemImage: "arrow.counterclockwise.circle")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(AgentPalette.color(for: limits.agent))
-                    .help(bankedResetsHelp(limits))
+            if limits.bankedResetCount > 0 {
+                bankedResets(limits)
             }
             if let note = limits.note {
                 Label(note, systemImage: "info.circle")
@@ -154,6 +142,46 @@ extension MenuView {
         .accessibilityHint("Shows this provider's usage by model")
     }
 
+    private func compactRow(_ window: QuotaWindow, limits: ProviderLimits) -> some View {
+        CompactLimitRow(
+            window: window, agent: limits.agent, isEstimate: limits.isEstimate,
+            showRemaining: preferences.barsShowRemaining,
+            showsPace: preferences.showsPace,
+            resetStyle: preferences.resetTimeStyle
+        )
+    }
+
+    /// Every banked reset with when it expires, soonest first.
+    private func bankedResets(_ limits: ProviderLimits) -> some View {
+        let color = AgentPalette.color(for: limits.agent)
+        return TimelineView(.periodic(from: .now, by: 60)) { context in
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.counterclockwise.circle")
+                    .foregroundStyle(color)
+                Text("\(limits.bankedResetCount) banked")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(color)
+                ForEach(Array(limits.resetCredits.prefix(4).enumerated()), id: \.offset) { _, credit in
+                    Text(credit.expiresAt.map { LimitText.duration($0.timeIntervalSince(context.date)) } ?? "no expiry")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background(.quaternary.opacity(0.6), in: Capsule())
+                }
+                if limits.bankedResetCount > min(limits.resetCredits.count, 4) && !limits.resetCredits.isEmpty {
+                    Text("+\(limits.bankedResetCount - min(limits.resetCredits.count, 4))")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.system(size: 10.5))
+            .lineLimit(1)
+        }
+        .help(bankedResetsHelp(limits))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(LimitText.bankedResets(limits) ?? "")
+    }
+
     /// Sources report plans as "team", "pro", "Max 5x"; show them uniformly.
     private func planBadge(_ plan: String) -> String {
         plan.prefix(1).uppercased() + plan.dropFirst()
@@ -173,20 +201,82 @@ extension MenuView {
         let age = Format.age(since: observed, now: now)
         return age == "just now" ? "\(limits.source) just now" : "\(limits.source) · \(age)"
     }
+}
 
-    private func limitWindow(_ window: QuotaWindow, agent: String, isEstimate: Bool) -> some View {
-        LimitWindowRow(
-            window: window, agent: agent, isEstimate: isEstimate,
-            showRemaining: preferences.barsShowRemaining,
-            showsPace: preferences.showsPace,
-            resetStyle: preferences.resetTimeStyle
-        )
+/// One limit window on a single line for the popover: name, bar with the
+/// pace tick, amount, and when it resets. A second line appears only when the
+/// pace needs attention (the limit is reached or will run out early).
+struct CompactLimitRow: View {
+    var window: QuotaWindow
+    var agent: String
+    var isEstimate = false
+    var showRemaining: Bool
+    var showsPace: Bool
+    var resetStyle: ResetTimeStyle
+
+    var body: some View {
+        let remaining = showRemaining && !isEstimate
+        let used = min(max(window.usedPercent, 0), 100)
+        let pace = showsPace && !isEstimate ? LimitText.pace(window) : nil
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Text(LimitText.shortTitle(window.label))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .lineLimit(1)
+                    .frame(width: 74, alignment: .leading)
+                LimitBar(
+                    fraction: (remaining ? 100 - used : used) / 100,
+                    color: AgentPalette.color(for: agent),
+                    marker: pace == nil ? nil : window.elapsedFraction().map { remaining ? 1 - $0 : $0 }
+                )
+                .frame(height: 5)
+                Text(LimitText.amount(window, showRemaining: remaining, isEstimate: isEstimate))
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(LimitStyle.amountColor(usedPercent: window.usedPercent))
+                    .lineLimit(1)
+                    .frame(width: 62, alignment: .trailing)
+                Group {
+                    if let resetsAt = window.resetsAt {
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            Text(LimitText.resetTime(resetsAt, style: resetStyle, now: context.date))
+                                .help(LimitText.reset(resetsAt, style: resetStyle, now: context.date))
+                        }
+                    } else {
+                        Text("")
+                    }
+                }
+                .font(.system(size: 10.5))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: 58, alignment: .trailing)
+            }
+            .frame(height: 20)
+            if let pace, LimitText.needsAttention(pace) {
+                Text(LimitText.paceText(pace))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(LimitWindowRow.paceColor(pace))
+                    .lineLimit(1)
+                    .padding(.leading, 82)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(LimitText.title(window.label))
+        .accessibilityValue(accessibilityValue(remaining: remaining, pace: pace))
+    }
+
+    private func accessibilityValue(remaining: Bool, pace: LimitText.Pace?) -> String {
+        var parts = [LimitText.amount(window, showRemaining: remaining, isEstimate: isEstimate)]
+        if let resetsAt = window.resetsAt { parts.append(LimitText.reset(resetsAt, style: resetStyle)) }
+        if let pace, LimitText.needsAttention(pace) { parts.append(LimitText.paceText(pace)) }
+        return parts.joined(separator: ", ")
     }
 }
 
-/// One limit window — title, amount, bar with pace tick, pace and reset —
-/// rendered identically in the popover, the Subscriptions page, and the
-/// settings preview.
+/// One limit window in full — title, amount, bar with pace tick, pace and
+/// reset — rendered identically on the Subscriptions page and in the
+/// settings preview. The popover uses `CompactLimitRow`.
 struct LimitWindowRow: View {
     var window: QuotaWindow
     var agent: String

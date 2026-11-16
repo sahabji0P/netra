@@ -100,6 +100,23 @@ enum AccountText {
         return age == "just now" ? "Limits just now" : "Limits as of \(age)"
     }
 
+    /// The line under a parked account in the switcher: the room it had when
+    /// last seen, or that its windows have rolled over since.
+    static func switcherDetail(_ account: ManagedAccount, showRemaining: Bool, now: Date = .now) -> String {
+        if account.attention != nil { return parkedStatus(account, now: now) }
+        let status = parkedStatus(account, now: now)
+        let glance = glanceWindows(account.parkedWindows(now: now))
+        guard !glance.isEmpty else { return status }
+        if glance.allSatisfy(\.hasResetSince) { return "\(status) · limits have reset since" }
+        let amounts = glance.map { parked -> String in
+            let label = windowShortLabel(parked.window.label)
+            if parked.hasResetSince { return "\(label) reset" }
+            let used = min(max(parked.window.usedPercent, 0), 100)
+            return showRemaining ? "\(label) \(Int((100 - used).rounded()))% left" : "\(label) \(Int(used.rounded()))% used"
+        }
+        return "\(amounts.joined(separator: " · ")) · \(status.prefix(1).lowercased() + status.dropFirst())"
+    }
+
     static func planLine(_ account: ManagedAccount) -> String {
         [account.identity.plan, account.identity.organizationName.flatMap(meaningfulOrganization)]
             .compactMap { $0 }
@@ -168,106 +185,15 @@ extension MenuView {
         return AccountProvider(rawValue: agent)
     }
 
-    /// The account chip beside a card's plan badge: who is signed in, and a
-    /// menu to switch, add, or manage accounts.
+    /// The account control in a card's header: who is signed in, with the
+    /// parked accounts beside it, opening the switcher.
     @ViewBuilder
-    func accountChip(for agent: String) -> some View {
-        if let accounts, let provider = accountProvider(for: agent),
-           let live = accounts.liveIdentities[provider] {
-            let active = accounts.activeAccount(for: provider)
-            Menu {
-                accountMenuItems(accounts, provider: provider)
-            } label: {
-                let name = active.map(accounts.roster.label(for:))
-                    ?? live.email.flatMap { $0.split(separator: "@").first.map(String.init) } ?? "Account"
-                // One Text, so the borderless menu keeps the chevron after the name.
-                Text("\(accounts.switching == provider ? "Switching…" : name) \(Image(systemName: "chevron.down"))")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Signed in as \(live.email ?? "this account"). Click to switch accounts.")
-            .accessibilityLabel("\(AgentPalette.shortName(agent)) account: \(live.email ?? "unknown")")
-        }
-    }
-
-    @ViewBuilder
-    private func accountMenuItems(_ accounts: AccountStore, provider: AccountProvider) -> some View {
-        let managed = accounts.accounts(for: provider)
-        let active = accounts.activeAccount(for: provider)
-        if managed.count > 1 || (managed.count == 1 && active == nil) {
-            Section("Switch \(AgentPalette.displayName(provider.agent)) to") {
-                ForEach(managed) { account in
-                    Button {
-                        Task { await accounts.switchTo(account) }
-                    } label: {
-                        if account.id == active?.id {
-                            Label(menuTitle(account), systemImage: "checkmark")
-                        } else {
-                            Text(menuTitle(account))
-                        }
-                    }
-                    .disabled(account.id == active?.id || accounts.switching != nil)
-                }
-            }
-        } else if let live = accounts.liveIdentities[provider] {
-            Section("Signed in") {
-                Text(live.email ?? "This account")
-            }
-        }
-        Divider()
-        Button("Add \(AgentPalette.shortName(provider.agent)) account…") {
-            Task { await accounts.beginSignIn(provider) }
-        }
-        Button("Manage Accounts…") { showDashboard(.accounts) }
-    }
-
-    private func menuTitle(_ account: ManagedAccount) -> String {
-        var parts = [account.nickname.flatMap { $0.isEmpty ? nil : "\($0) — \(account.title)" } ?? account.title]
-        if let plan = account.identity.plan { parts.append(plan) }
-        if account.id != accounts?.activeAccount(for: account.provider)?.id,
-           let glance = AccountText.glanceWindows(account.parkedWindows()).last {
-            parts.append(glance.hasResetSince
-                ? "\(AccountText.windowShortLabel(glance.window.label)) reset"
-                : "\(AccountText.windowShortLabel(glance.window.label)) \(Int(glance.window.usedPercent.rounded()))%")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    /// Parked accounts under the live account's limits: a glance at how much
-    /// room each has, and a one-click switch.
-    @ViewBuilder
-    func parkedAccountsStrip(for agent: String) -> some View {
-        if let accounts, let provider = accountProvider(for: agent) {
-            let parked = accounts.parkedAccounts(for: provider)
-            if !parked.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Rectangle()
-                        .fill(.separator.opacity(0.6))
-                        .frame(height: 0.5)
-                        .padding(.bottom, 1)
-                    ForEach(parked.prefix(3)) { account in
-                        ParkedAccountRow(
-                            account: account,
-                            label: accounts.roster.label(for: account),
-                            showRemaining: preferences.barsShowRemaining,
-                            isSwitching: accounts.switching == provider,
-                            switchDisabled: accounts.switching != nil
-                        ) {
-                            Task { await accounts.switchTo(account) }
-                        }
-                    }
-                    if parked.count > 3 {
-                        Button("\(parked.count - 3) more in Accounts") { showDashboard(.accounts) }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Color.accentColor)
-                    }
-                }
-            }
+    func accountSwitcher(for agent: String) -> some View {
+        if let accounts, let provider = accountProvider(for: agent), accounts.liveIdentities[provider] != nil {
+            AccountSwitcherButton(
+                accounts: accounts, provider: provider,
+                showRemaining: preferences.barsShowRemaining
+            ) { showDashboard(.accounts) }
         }
     }
 
@@ -283,8 +209,150 @@ extension MenuView {
     }
 }
 
-/// One parked account in the popover: face, name, freshness, two meters, and
-/// the switch button.
+/// Who is signed in to a provider, as a face and a name, with the parked
+/// accounts as dimmed faces beside it. Clicking opens a list with one Switch
+/// button per parked account, so a switch is always a deliberate second click.
+struct AccountSwitcherButton: View {
+    var accounts: AccountStore
+    var provider: AccountProvider
+    var showRemaining: Bool
+    var manage: () -> Void
+
+    @State private var isOpen = false
+
+    var body: some View {
+        let active = accounts.activeAccount(for: provider)
+        let parked = accounts.parkedAccounts(for: provider)
+        Button { isOpen.toggle() } label: {
+            HStack(spacing: 5) {
+                HStack(spacing: -5) {
+                    if let active { AccountAvatar(account: active, size: 16, isActive: true) }
+                    ForEach(parked.prefix(2)) { account in
+                        AccountAvatar(account: account, size: 16).opacity(0.45)
+                    }
+                }
+                Text(accounts.switching == provider ? "Switching…" : name(active))
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Signed in as \(accounts.liveIdentities[provider]?.email ?? "this account"). Click to switch accounts.")
+        .accessibilityLabel("\(AgentPalette.shortName(provider.agent)) account: \(name(active)). Switch accounts")
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            AccountSwitcherList(
+                accounts: accounts, provider: provider, showRemaining: showRemaining,
+                manage: manage, dismiss: { isOpen = false }
+            )
+        }
+    }
+
+    private func name(_ active: ManagedAccount?) -> String {
+        active.map(accounts.roster.label(for:))
+            ?? accounts.liveIdentities[provider]?.email.flatMap { $0.split(separator: "@").first.map(String.init) }
+            ?? "Account"
+    }
+}
+
+/// The switcher's list: the account in use, each parked account with the
+/// room it had when last seen and its own Switch button, then add and manage.
+struct AccountSwitcherList: View {
+    var accounts: AccountStore
+    var provider: AccountProvider
+    var showRemaining: Bool
+    var manage: () -> Void
+    var dismiss: () -> Void = {}
+
+    var body: some View {
+        let active = accounts.activeAccount(for: provider)
+        VStack(alignment: .leading, spacing: 2) {
+            if let active {
+                row(active, detail: ["In use", active.identity.plan].compactMap { $0 }.joined(separator: " · ")) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            } else if let email = accounts.liveIdentities[provider]?.email {
+                Text("Signed in as \(email)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            }
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(accounts.parkedAccounts(for: provider)) { account in
+                        row(account, detail: AccountText.switcherDetail(account, showRemaining: showRemaining, now: context.date)) {
+                            Button("Switch") {
+                                dismiss()
+                                Task { await accounts.switchTo(account) }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .tint(AgentPalette.color(for: provider.agent))
+                            .disabled(accounts.switching != nil || account.attention != nil)
+                            .accessibilityLabel("Switch to \(account.title)")
+                        }
+                    }
+                }
+            }
+            Divider().padding(.vertical, 4)
+            action("Add \(AgentPalette.shortName(provider.agent)) account…") {
+                Task { await accounts.beginSignIn(provider) }
+            }
+            action("Manage accounts…", manage)
+        }
+        .padding(8)
+        .frame(width: 290, alignment: .leading)
+    }
+
+    private func row(_ account: ManagedAccount, detail: String, @ViewBuilder trailing: () -> some View) -> some View {
+        HStack(spacing: 9) {
+            AccountAvatar(account: account, size: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(accounts.roster.label(for: account))
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(account.attention == nil ? Color.secondary : .orange)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 6)
+            trailing()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func action(_ title: String, _ run: @escaping () -> Void) -> some View {
+        Button {
+            dismiss()
+            run()
+        } label: {
+            Text(title)
+                .font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// One parked account on the Subscriptions page: face, name, freshness, two
+/// meters, and the switch button.
 struct ParkedAccountRow: View {
     var account: ManagedAccount
     var label: String

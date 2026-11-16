@@ -37,6 +37,12 @@ final class AccountsRenderPreview: XCTestCase {
             accounts: accounts, rendersFullHeight: true
         )
         render(menu, name: "accounts-menu", outputDir: outputDir)
+        for provider in [AccountProvider.claude, .codex] {
+            render(
+                AccountSwitcherList(accounts: accounts, provider: provider, showRemaining: true, manage: {}),
+                name: "accounts-switcher-\(provider.rawValue)", outputDir: outputDir
+            )
+        }
 
         render(
             DashboardAccountsView(accounts: Self.previewAccounts(withNotice: false), store: store, preferences: preferences)

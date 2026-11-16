@@ -445,6 +445,29 @@ final class AccountSwitchingTests: XCTestCase {
         let glance = AccountText.glanceWindows(windows)
         XCTAssertEqual(glance.map(\.window.label), ["5h", "weekly · Fable"])
         XCTAssertEqual(AccountText.parkedStatus(parked, now: now), "Limits as of 1h ago")
+
+        // The switcher's line: what room it had, and when that was seen.
+        XCTAssertEqual(
+            AccountText.switcherDetail(parked, showRemaining: true, now: now),
+            "5h reset · Fable 40% left · limits as of 1h ago"
+        )
+        XCTAssertEqual(
+            AccountText.switcherDetail(parked, showRemaining: false, now: now),
+            "5h reset · Fable 60% used · limits as of 1h ago"
+        )
+        // Every window has rolled over: the old percentages say nothing.
+        let later = now.addingTimeInterval(8 * 86400)
+        XCTAssertEqual(
+            AccountText.switcherDetail(parked, showRemaining: true, now: later),
+            "Limits as of 8d ago · limits have reset since"
+        )
+        // An account that needs attention says only that.
+        var broken = parked
+        broken.attention = .signInAgain
+        XCTAssertEqual(
+            AccountText.switcherDetail(broken, showRemaining: true, now: now),
+            "Sign in again to use this account"
+        )
     }
 
     func testUpsertKeepsNicknameAndFillsMissingProfileFields() {

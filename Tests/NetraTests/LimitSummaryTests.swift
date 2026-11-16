@@ -30,6 +30,35 @@ final class LimitSummaryTests: XCTestCase {
         XCTAssertEqual(LimitText.amount(over, showRemaining: false, isEstimate: true), "1.3× of peak")
     }
 
+    func testShortTitlesNameAWindowInOneWord() {
+        XCTAssertEqual(LimitText.shortTitle("5h"), "Session")
+        XCTAssertEqual(LimitText.shortTitle("weekly"), "Weekly")
+        XCTAssertEqual(LimitText.shortTitle("weekly · Fable"), "Fable")
+        XCTAssertEqual(LimitText.shortTitle("included usage"), "Included")
+        XCTAssertEqual(LimitText.shortTitle("API models"), "API")
+        XCTAssertEqual(LimitText.shortTitle("monthly"), "Monthly")
+    }
+
+    func testResetTimeIsTheResetWithoutItsVerb() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let soon = now.addingTimeInterval(3 * 3600 + 48 * 60)
+        XCTAssertEqual(LimitText.resetTime(soon, style: .countdown, now: now), "3h 48m")
+        XCTAssertEqual(LimitText.reset(soon, style: .countdown, now: now), "Resets in 3h 48m")
+        XCTAssertEqual(
+            LimitText.reset(soon, style: .clock, now: now),
+            "Resets \(LimitText.resetTime(soon, style: .clock, now: now))"
+        )
+    }
+
+    func testOnlyAPaceThatRunsOutOrIsReachedNeedsItsOwnLine() {
+        XCTAssertTrue(LimitText.needsAttention(.exhausted))
+        XCTAssertTrue(LimitText.needsAttention(.ahead(points: 14, runsOutIn: 7_000)))
+        XCTAssertFalse(LimitText.needsAttention(.ahead(points: 14, runsOutIn: nil)))
+        XCTAssertFalse(LimitText.needsAttention(.behind(points: 48)))
+        XCTAssertFalse(LimitText.needsAttention(.onPace))
+        XCTAssertFalse(LimitText.needsAttention(nil))
+    }
+
     func testCountdownAndClockResets() {
         XCTAssertEqual(LimitText.reset(now.addingTimeInterval(2 * 86400 + 4 * 3600), style: .countdown, now: now), "Resets in 2d 4h")
         XCTAssertEqual(LimitText.reset(now.addingTimeInterval(3 * 3600 + 12 * 60), style: .countdown, now: now), "Resets in 3h 12m")

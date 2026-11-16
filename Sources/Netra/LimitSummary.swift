@@ -158,6 +158,21 @@ enum LimitText {
         }
     }
 
+    /// The shortest honest name for a window, for a one-line row: "Session",
+    /// "Weekly", "Fable", "Included".
+    static func shortTitle(_ label: String) -> String {
+        switch label {
+        case "5h": return "Session"
+        case "included usage": return "Included"
+        case "auto models": return "Auto"
+        case "API models": return "API"
+        case "on-demand spend": return "On-demand"
+        default:
+            if label.hasPrefix("weekly · ") { return String(label.dropFirst("weekly · ".count)) }
+            return title(label)
+        }
+    }
+
     /// "54% used" or "46% left"; estimates past 100% read as a multiplier.
     static func amount(_ window: QuotaWindow, showRemaining: Bool, isEstimate: Bool) -> String {
         if isEstimate { return "\(Format.peakPercent(window.usedPercent)) of peak" }
@@ -168,17 +183,24 @@ enum LimitText {
     }
 
     static func reset(_ date: Date, style: ResetTimeStyle, now: Date = .now, calendar: Calendar = .current) -> String {
+        let time = resetTime(date, style: style, now: now, calendar: calendar)
+        return style == .countdown ? "Resets in \(time)" : "Resets \(time)"
+    }
+
+    /// When a window resets, without the verb: "3h 48m", "6:30 PM",
+    /// "Fri 9:00 AM".
+    static func resetTime(_ date: Date, style: ResetTimeStyle, now: Date = .now, calendar: Calendar = .current) -> String {
         switch style {
         case .countdown:
-            return "Resets in \(duration(date.timeIntervalSince(now)))"
+            return duration(date.timeIntervalSince(now))
         case .clock:
             let time = date.formatted(date: .omitted, time: .shortened)
-            if calendar.isDate(date, inSameDayAs: now) { return "Resets \(time)" }
+            if calendar.isDate(date, inSameDayAs: now) { return time }
             let within6Days = date.timeIntervalSince(now) < 6 * 86400
             let day = within6Days
                 ? date.formatted(.dateTime.weekday(.abbreviated))
                 : date.formatted(.dateTime.day().month(.abbreviated))
-            return "Resets \(day) \(time)"
+            return "\(day) \(time)"
         }
     }
 
@@ -218,6 +240,16 @@ enum LimitText {
             points: Int(delta.rounded()),
             runsOutIn: untilEmpty.flatMap { $0 < remaining ? $0 : nil }
         )
+    }
+
+    /// Whether a pace is worth a line of its own in a compact row: the limit
+    /// is reached, or it will run out before the window resets.
+    static func needsAttention(_ pace: Pace?) -> Bool {
+        switch pace {
+        case .exhausted: true
+        case .ahead(_, let runsOut): runsOut != nil
+        default: false
+        }
     }
 
     /// "3 banked resets · next expires in 12d".
