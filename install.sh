@@ -129,8 +129,12 @@ signer() {
 
 # --- running copies ----------------------------------------------------------
 
+# The menu-bar app and, since 2.0, its window (a second app nested inside the
+# bundle). Both must stop before the bundle is replaced, or the window would
+# keep running from the deleted copy.
 running_pids() {
     pgrep -f "$APP_NAME/Contents/MacOS/Netra" 2>/dev/null || true
+    pgrep -f "$APP_NAME/Contents/Helpers/Netra Dashboard.app/Contents/MacOS/netra-dashboard" 2>/dev/null || true
 }
 
 # Quit with SIGTERM rather than an Apple Event: `osascript ... quit` would make

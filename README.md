@@ -335,6 +335,26 @@ xattr -dr com.apple.quarantine /Applications/Netra.app
 
 The app shows a quiet notice in its footer when a newer release exists.
 
+### Upgrading from 1.x to 2.0
+
+2.0 replaces the dashboard window with a new one that is its own app inside
+`Netra.app`. Upgrade the usual way; nothing needs to be moved or converted.
+
+- **Your data stays.** The usage history, saved limits, managed accounts, and
+  Keychain items are read as they are. Nothing in
+  `~/Library/Application Support/Netra` is rewritten by the upgrade.
+- **Your settings stay.** The old single menu-bar label choice becomes the
+  matching new label (icon plus items); every other setting carries over.
+  One difference: the highest-usage percent now follows the "bars show used
+  or left" choice, so with bars showing what is left it reads as percent left.
+- **The window appears in the Dock** while it is open, and closes when Netra
+  quits. Settings and Accounts live only in that window now.
+- **Going back to 1.4.0** works: download `Netra-1.4.0.zip` from the Releases
+  page (the installer cannot fetch releases that old). 1.4.0 ignores the new
+  label settings and the two new files (`dashboard-state.json`, `commands/`),
+  which can be deleted.
+- **Building from source needs Rust** (`cargo`) as well as Swift.
+
 ## Uninstall
 
 Turn off **Launch at login** in Netra's Settings first (only the app itself

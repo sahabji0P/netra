@@ -9,6 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
     }
 
+    /// The window is a separate app that can only ask Netra to act, so it
+    /// closes with Netra rather than staying open and unanswered.
+    func applicationWillTerminate(_ notification: Notification) {
+        DashboardLauncher.shared.closeWindow()
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
