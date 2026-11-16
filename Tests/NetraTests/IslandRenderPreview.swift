@@ -22,18 +22,14 @@ final class IslandRenderPreview: XCTestCase {
         let preferences = AppPreferences(defaults: defaults)
         let now = Date.now
         let snapshot = Self.snapshot(now: now)
-        let accounts = AccountsRenderPreview.previewAccounts(withNotice: false)
-        let awake = AwakeController()
 
         // Resting.
         render(
-            IslandCompactContent(snapshot: snapshot, state: .fresh, preferences: preferences, isAwake: true)
-                .fixedSize(),
+            IslandCompactContent(snapshot: snapshot, preferences: preferences).fixedSize(),
             name: "island-compact", radius: IslandTheme.compactBottomRadius, outputDir: outputDir
         )
         render(
-            IslandCompactContent(snapshot: nil, state: .empty, preferences: preferences, isAwake: false)
-                .fixedSize(),
+            IslandCompactContent(snapshot: nil, preferences: preferences).fixedSize(),
             name: "island-compact-empty", radius: IslandTheme.compactBottomRadius, outputDir: outputDir
         )
 
@@ -57,42 +53,49 @@ final class IslandRenderPreview: XCTestCase {
             )
         }
 
-        // Expanded: full, with a notice, estimate-only, stale, and empty.
+        // Expanded: full, two providers, estimate-only and stale, a missing
+        // Claude card after a failed refresh, and empty.
         render(
-            IslandExpandedContent(
-                snapshot: snapshot, state: .fresh, preferences: preferences, accounts: accounts, awake: awake,
-                version: IslandVersion(current: "1.3.0")
-            ),
+            IslandExpandedContent(snapshot: snapshot, state: .fresh, preferences: preferences),
             name: "island-expanded", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
+        let twoProviders = AppPreferences(defaults: defaults)
+        twoProviders.setProvider("cursor", visibleInMenu: false)
+        twoProviders.setProvider("cursor-grok-bot", visibleInMenu: false)
         render(
-            IslandExpandedContent(
-                snapshot: snapshot, state: .fresh, preferences: preferences,
-                accounts: AccountsRenderPreview.previewAccounts(withNotice: true), awake: awake,
-                version: IslandVersion(current: "1.3.0", available: "1.3.1")
-            ),
-            name: "island-expanded-notice", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
+            IslandExpandedContent(snapshot: snapshot, state: .fresh, preferences: twoProviders),
+            name: "island-expanded-two", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
+        for range in [IslandCostRange.week, .month] {
+            render(
+                IslandCostTile(
+                    model: IslandCostModel(snapshot: snapshot, hiddenProviders: [], range: range, now: now),
+                    range: .constant(range), selectedDay: .constant(nil), openUsage: {}
+                )
+                .frame(width: 202, height: 186)
+                .padding(14),
+                name: "island-cost-\(range.title)", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
+            )
+        }
+        twoProviders.setProvider("cursor", visibleInMenu: true)
+        twoProviders.setProvider("cursor-grok-bot", visibleInMenu: true)
         render(
             IslandExpandedContent(
                 snapshot: Self.snapshot(now: now, estimateOnly: true, fetchedAt: now.addingTimeInterval(-3 * 3600)),
-                state: .stale, preferences: preferences, accounts: nil, awake: awake
+                state: .stale, preferences: preferences
             ),
             name: "island-expanded-estimate-stale", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
         render(
             IslandExpandedContent(
                 snapshot: Self.snapshot(now: now, claudeUsedWithoutLimits: true),
-                state: .failed("ccusage timed out"), preferences: preferences, accounts: accounts, awake: awake,
+                state: .failed("ccusage timed out"), preferences: preferences,
                 claudeKeychainNeedsApproval: true
             ),
             name: "island-expanded-missing-claude", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
         render(
-            IslandExpandedContent(
-                snapshot: nil, state: .empty, preferences: preferences,
-                accounts: AccountStore(preview: AccountRoster(), live: [:]), awake: awake
-            ),
+            IslandExpandedContent(snapshot: nil, state: .empty, preferences: preferences),
             name: "island-expanded-empty", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
     }
@@ -117,8 +120,14 @@ final class IslandRenderPreview: XCTestCase {
             )
         }
         let agents = [agent("claude", cost: 38.42, tokens: 41_200_000), agent("codex", cost: 9.17, tokens: 12_800_000)]
+        // Two quieter weeks before today, so the cost tile has bars and a trend.
+        let earlier = (1...20).map { offset -> CCRow in
+            let day = Calendar.current.date(byAdding: .day, value: -offset, to: now) ?? now
+            let cost = 8 + Double((offset * 37) % 29)
+            return row(PeriodKeys.day(day), [agent("claude", cost: cost, tokens: Int(cost * 900_000))])
+        }
         let report = CCUnifiedReport(
-            daily: [row(PeriodKeys.day(now), agents)],
+            daily: earlier + [row(PeriodKeys.day(now), agents)],
             weekly: [],
             monthly: []
         )
@@ -215,16 +224,7 @@ final class IslandDataTests: XCTestCase {
         XCTAssertEqual(IslandText.countdown(2 * 86400 + 4 * 3600), "2d 4h")
     }
 
-    func testRingOrderPutsShortestWindowOutsideAndKeepsUnknownLast() {
-        let windows = [
-            QuotaWindow(label: "weekly", usedPercent: 10, durationSeconds: 7 * 86400),
-            QuotaWindow(label: "monthly", usedPercent: 10),
-            QuotaWindow(label: "5h", usedPercent: 10, durationSeconds: 5 * 3600),
-        ]
-        XCTAssertEqual(IslandData.ringOrder(windows).map(\.label), ["5h", "weekly", "monthly"])
-    }
-
-    func testPeekRotatesThroughEveryProviderUsingItsHeadlineWindow() {
+    func testRestingIslandShowsTheProviderClosestToItsHeadlineLimit() {
         let cursor = ProviderLimits(
             agent: "cursor", source: "Reported by Cursor", observedAt: nil,
             windows: [
@@ -234,46 +234,121 @@ final class IslandDataTests: XCTestCase {
         )
         let claude = ProviderLimits(
             agent: "claude", source: "Via Claude Code", observedAt: nil,
-            windows: [QuotaWindow(label: "5h", usedPercent: 13), QuotaWindow(label: "weekly", usedPercent: 2)]
+            windows: [QuotaWindow(label: "5h", usedPercent: 62), QuotaWindow(label: "weekly", usedPercent: 2)]
         )
         // A side pool at 100% must not stand for the provider.
         XCTAssertEqual(IslandData.primaryWindow(cursor)?.label, "included usage")
-        // Without a weekly window the next one is the second line.
-        XCTAssertEqual(IslandData.secondaryWindow(cursor)?.label, "API models")
-        // A week-long window wins the second line even when unlabeled.
-        var withWeek = cursor
-        withWeek.windows.append(QuotaWindow(label: "pool", usedPercent: 9, durationSeconds: 7 * 24 * 3600))
-        XCTAssertEqual(IslandData.secondaryWindow(withWeek)?.label, "pool")
-        XCTAssertEqual(IslandData.secondaryWindow(claude)?.label, "weekly")
-
-        let start = Date(timeIntervalSinceReferenceDate: 0)
-        let shown = (0..<4).map { step in
-            IslandData.rotating([claude, cursor], now: start.addingTimeInterval(Double(step) * IslandData.rotationInterval))?.agent
-        }
-        XCTAssertEqual(shown, ["claude", "cursor", "claude", "cursor"])
-        XCTAssertEqual(
-            IslandData.rotating([claude, cursor], now: start.addingTimeInterval(IslandData.rotationInterval - 0.5))?.agent,
-            "claude"
-        )
-        XCTAssertNil(IslandData.rotating([], now: start))
+        XCTAssertEqual(IslandData.hottest([cursor, claude])?.agent, "claude")
+        XCTAssertEqual(IslandData.hottest([claude, cursor])?.agent, "claude")
+        XCTAssertNil(IslandData.hottest([]))
     }
 
-    func testIslandSectionsDefaultToTheTrimmedSetAndPersist() {
-        let suite = "NetraTests.IslandSections"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let preferences = AppPreferences(defaults: defaults)
-        XCTAssertEqual(preferences.islandSections, IslandSection.defaults)
-        XCTAssertTrue(preferences.showsIslandSection(.providerSpend))
-        XCTAssertTrue(preferences.showsIslandSection(.bankedResets))
-        XCTAssertTrue(preferences.showsIslandSection(.secondWindow))
-        XCTAssertFalse(preferences.showsIslandSection(.accounts))
-        preferences.setIslandSection(.accounts, true)
-        preferences.setIslandSection(.usageFooter, false)
-        let reloaded = AppPreferences(defaults: defaults)
-        XCTAssertTrue(reloaded.showsIslandSection(.accounts))
-        XCTAssertFalse(reloaded.showsIslandSection(.usageFooter))
+    // MARK: Cost tile
+
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    /// Daily costs keyed by days before `now` (0 = today).
+    private func snapshot(costs: [Int: Double], now: Date, agent: String = "claude") -> UsageSnapshot {
+        let rows = costs.map { offset, cost -> CCRow in
+            let day = utc.date(byAdding: .day, value: -offset, to: now)!
+            let tokens = Int(cost * 1_000)
+            let stat = CCAgentRow(agent: agent, inputTokens: tokens, outputTokens: 0, cacheCreationTokens: 0,
+                                  cacheReadTokens: 0, totalTokens: tokens, totalCost: cost, modelBreakdowns: [])
+            return CCRow(period: PeriodKeys.day(day, utc), inputTokens: tokens, outputTokens: 0, cacheCreationTokens: 0,
+                         cacheReadTokens: 0, totalTokens: tokens, totalCost: cost, agents: [stat], modelBreakdowns: [])
+        }
+        return UsageSnapshot(
+            fetchedAt: now, report: CCUnifiedReport(daily: rows, weekly: [], monthly: []),
+            activeBlock: nil, codexQuota: nil, claudeQuota: nil, calendar: utc
+        )
+    }
+
+    func testCostTileShowsTwoWeeksWithTodayInFocusAndItsTrend() {
+        let now = ISODate.parse("2026-09-26T12:00:00Z")!
+        // Today $30; the seven days before average $10; one day is missing.
+        let snapshot = snapshot(costs: [0: 30, 1: 10, 2: 10, 3: 10, 4: 10, 5: 10, 6: 10, 7: 10, 9: 4], now: now)
+        let model = IslandCostModel(snapshot: snapshot, hiddenProviders: [], now: now, calendar: utc)
+
+        XCTAssertEqual(model.days.count, IslandCostRange.today.barCount)
+        XCTAssertEqual(model.days.first?.id, "2026-09-13")
+        XCTAssertEqual(model.days.last?.id, "2026-09-26")
+        XCTAssertEqual(model.days.first { $0.id == "2026-09-18" }?.cost, 0, "a day without usage is a zero bar")
+        XCTAssertTrue(model.focusIsToday)
+        XCTAssertEqual(model.cost, 30)
+        XCTAssertEqual(model.tokens, 30_000)
+        XCTAssertEqual(try XCTUnwrap(model.trend), 2.0, accuracy: 0.000_1, "three times the average is +200%")
+        XCTAssertEqual(model.trendCaption, "vs 7-day avg")
+    }
+
+    func testClickingABarFocusesThatDayAndComparesItWithItsOwnPriorWeek() {
+        let now = ISODate.parse("2026-09-26T12:00:00Z")!
+        // Sept 23 (3 days back) cost $5; its prior seven days cost $10 each.
+        var costs: [Int: Double] = [0: 30, 3: 5]
+        for offset in 4...10 { costs[offset] = 10 }
+        let model = IslandCostModel(
+            snapshot: snapshot(costs: costs, now: now), hiddenProviders: [],
+            selectedDay: "2026-09-23", now: now, calendar: utc
+        )
+        XCTAssertFalse(model.focusIsToday)
+        XCTAssertEqual(model.focusDay?.id, "2026-09-23")
+        XCTAssertEqual(model.cost, 5)
+        XCTAssertEqual(try XCTUnwrap(model.trend), -0.5, accuracy: 0.000_1)
+
+        // A day outside the two weeks shown falls back to today.
+        let stale = IslandCostModel(
+            snapshot: snapshot(costs: costs, now: now), hiddenProviders: [],
+            selectedDay: "2026-08-01", now: now, calendar: utc
+        )
+        XCTAssertTrue(stale.focusIsToday)
+    }
+
+    func testCostTileLeavesOutHiddenProvidersAndHasNoTrendWithoutHistory() {
+        let now = ISODate.parse("2026-09-26T12:00:00Z")!
+        let hidden = IslandCostModel(
+            snapshot: snapshot(costs: [0: 30, 1: 10], now: now, agent: "codex"),
+            hiddenProviders: ["codex"], now: now, calendar: utc
+        )
+        XCTAssertEqual(hidden.cost, 0)
+        XCTAssertNil(hidden.trend)
+
+        let firstDay = IslandCostModel(snapshot: snapshot(costs: [0: 30], now: now), hiddenProviders: [], now: now, calendar: utc)
+        XCTAssertNil(firstDay.trend, "nothing to compare a first day with")
+        XCTAssertEqual(IslandCostModel(snapshot: nil, hiddenProviders: [], now: now, calendar: utc).cost, 0)
+    }
+
+    func testSevenAndThirtyDayRangesTotalTheSpanAndCompareWithTheOneBefore() {
+        let now = ISODate.parse("2026-09-26T12:00:00Z")!
+        // Last 7 days: $10 a day. The 7 before: $5 a day. Older: $1 a day.
+        var costs: [Int: Double] = [:]
+        for offset in 0..<7 { costs[offset] = 10 }
+        for offset in 7..<14 { costs[offset] = 5 }
+        for offset in 14..<60 { costs[offset] = 1 }
+        let snapshot = snapshot(costs: costs, now: now)
+
+        let week = IslandCostModel(snapshot: snapshot, hiddenProviders: [], range: .week, now: now, calendar: utc)
+        XCTAssertEqual(week.days.count, 7)
+        XCTAssertNil(week.focusDay)
+        XCTAssertEqual(week.cost, 70, accuracy: 0.000_1)
+        XCTAssertEqual(week.tokens, 70_000)
+        XCTAssertEqual(try XCTUnwrap(week.trend), 1.0, accuracy: 0.000_1, "$70 against $35")
+        XCTAssertEqual(week.trendCaption, "vs previous 7 days")
+
+        let month = IslandCostModel(snapshot: snapshot, hiddenProviders: [], range: .month, now: now, calendar: utc)
+        XCTAssertEqual(month.days.count, 30)
+        XCTAssertEqual(month.cost, 70 + 35 + 16, accuracy: 0.000_1)
+        XCTAssertEqual(try XCTUnwrap(month.trend), (121.0 - 30) / 30, accuracy: 0.000_1, "the 30 days before cost $30")
+
+        // A clicked bar inside a range shows that day, not the total.
+        let clicked = IslandCostModel(
+            snapshot: snapshot, hiddenProviders: [], range: .month, selectedDay: "2026-09-16", now: now, calendar: utc
+        )
+        XCTAssertEqual(clicked.focusDay?.id, "2026-09-16")
+        XCTAssertEqual(clicked.cost, 5)
+        XCTAssertEqual(clicked.trendCaption, "vs 7-day avg")
     }
 
     func testLimitCardsRespectVisibilityAndTodayHidesHiddenProviders() {

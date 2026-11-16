@@ -39,7 +39,7 @@ struct NetraApp: App {
         let updates = UpdateChecker()
         let island = IslandCoordinator(
             store: store, preferences: preferences, accounts: accounts,
-            awake: awake, updates: updates, dashboardNavigation: navigation
+            awake: awake, dashboardNavigation: navigation
         )
         // A switch refreshes limits at once, for the account now signed in.
         accounts.onSwitch = { [weak store, weak island] provider in

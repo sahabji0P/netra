@@ -9,16 +9,15 @@ enum IslandSurface: CaseIterable, Sendable {
 /// Sizes of the island around the notch. Widths that exceed the screen are
 /// clamped, so one set works on every display.
 struct IslandSizes: Equatable, Sendable {
-    /// Width of each "wing" beside the notch in the resting state (provider
-    /// mark + ring on the left, today's cost on the right).
-    /// Narrow enough to stay clear of the first status icon on a typical
-    /// MacBook menu bar; the content stacks on two lines to fit.
+    /// Width of the single "wing" on the left of the notch in the resting
+    /// state (provider mark and how much of its limit is used). The right of
+    /// the notch is left clear for menu-bar items.
     var wingWidth: CGFloat = 76
-    /// Extra width each wing gains while the pointer is over the island.
+    /// Extra width the wing gains while the pointer is over the island.
     var peekWingGrowth: CGFloat = 8
-    /// Extra width and height the resting shape grows by on hover.
+    /// Extra height the resting shape grows by on hover.
     var peekGrowth = CGSize(width: 24, height: 6)
-    var expanded = CGSize(width: 640, height: 480)
+    var expanded = CGSize(width: 440, height: 240)
     /// Activity height is measured below the notch, so the notch stays clear.
     var activity = CGSize(width: 380, height: 72)
     /// Space left free at each side of the screen when clamping.
@@ -117,7 +116,7 @@ enum NotchGeometry {
     /// The island's size in a mode, before clamping to the screen.
     static func islandSize(_ surface: IslandSurface, layout: NotchLayout, sizes: IslandSizes) -> CGSize {
         let resting = CGSize(
-            width: layout.notch.width + 2 * sizes.wingWidth,
+            width: layout.notch.width + sizes.wingWidth,
             height: layout.notch.height
         )
         switch surface {
@@ -125,7 +124,7 @@ enum NotchGeometry {
             return resting
         case .peek:
             return CGSize(
-                width: resting.width + 2 * sizes.peekWingGrowth,
+                width: resting.width + sizes.peekWingGrowth,
                 height: layout.notch.height + sizes.peekGrowth.height
             )
         case .expanded:
@@ -141,26 +140,27 @@ enum NotchGeometry {
         }
     }
 
-    /// The island's frame in global coordinates: top edge on the screen's
-    /// top, centered on the notch, clamped inside the screen.
+    /// The island's frame in global coordinates, top edge on the screen's
+    /// top and clamped inside the screen. At rest and on hover the shape is
+    /// the notch plus its wing on the left, so its right edge is the notch's
+    /// right edge; open, or showing an activity, it is centered on the notch.
     static func islandFrame(_ surface: IslandSurface, layout: NotchLayout, sizes: IslandSizes) -> CGRect {
         let size = islandSize(surface, layout: layout, sizes: sizes)
-        return topCenteredRect(size: size, layout: layout, sizes: sizes)
+        let leftOnly = layout.hasNotch && (surface == .resting || surface == .peek)
+        return topRect(size: size, layout: layout, sizes: sizes, maxX: leftOnly ? layout.notch.maxX : nil)
     }
 
-    /// The panel's frame: one fixed canvas large enough for every mode, so the
-    /// window never moves and only the drawn shape morphs.
+    /// The panel's frame: one fixed canvas that holds the shape in every
+    /// mode, so the window never moves and only the drawn shape morphs.
     static func panelFrame(layout: NotchLayout, sizes: IslandSizes) -> CGRect {
-        let union = IslandSurface.allCases.reduce(CGSize.zero) { size, surface in
-            let next = islandSize(surface, layout: layout, sizes: sizes)
-            return CGSize(width: max(size.width, next.width), height: max(size.height, next.height))
-        }
-        return topCenteredRect(size: union, layout: layout, sizes: sizes)
+        IslandSurface.allCases
+            .map { islandFrame($0, layout: layout, sizes: sizes) }
+            .reduce(CGRect.null) { $0.union($1) }
     }
 
     /// Where the island reacts to the pointer and to clicks. At rest on a
-    /// notched screen that is only the notch: the wings may cover menu-bar
-    /// icons, and clicks there must still reach those icons. Once peeking or
+    /// notched screen that is only the notch: the wing may cover a menu-bar
+    /// title, and clicks there must still reach it. Once peeking or
     /// open, the whole shape reacts.
     static func hitFrame(_ surface: IslandSurface, layout: NotchLayout, sizes: IslandSizes) -> CGRect {
         if surface == .resting, layout.hasNotch { return layout.notch }
@@ -178,12 +178,16 @@ enum NotchGeometry {
         )
     }
 
-    private static func topCenteredRect(size: CGSize, layout: NotchLayout, sizes: IslandSizes) -> CGRect {
+    /// A rect on the screen's top edge: centered on the notch, or with its
+    /// right edge at `maxX` when given. Either way it is kept on screen.
+    private static func topRect(
+        size: CGSize, layout: NotchLayout, sizes: IslandSizes, maxX: CGFloat? = nil
+    ) -> CGRect {
         let screen = layout.screenFrame
         let maxWidth = max(screen.width - 2 * sizes.screenMargin, 0)
         let width = min(size.width, maxWidth)
         let height = min(size.height, screen.height)
-        var minX = layout.notch.midX - width / 2
+        var minX = maxX.map { $0 - width } ?? layout.notch.midX - width / 2
         // Keep the shape on screen if the notch is off-center or the island
         // is wider than the space on one side.
         minX = min(max(minX, screen.minX + sizes.screenMargin), screen.maxX - sizes.screenMargin - width)

@@ -1,5 +1,12 @@
 # Notch island: plan and contracts
 
+> **Superseded on 2026-11-15.** The expanded island described below (rings,
+> one tall card per provider, accounts, banked resets, stats strip) was
+> replaced by a smaller bento grid: one cost tile and one tile per provider
+> limit, in `IslandBento.swift`. The resting island is now a single wing on
+> the left of the notch. The shell, mode machine, and live activities in this
+> plan are unchanged. This file is kept as the record of the original build.
+
 Netra gains a notch "island": a black panel over the MacBook camera notch that
 blends with it, shows a tiny resting summary, grows briefly for live
 activities, and expands on hover/click into one place for limits, accounts,
