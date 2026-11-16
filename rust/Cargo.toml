@@ -1,0 +1,18 @@
+# Netra's Rust side: a usage core with no UI or macOS dependency, and a GPUI
+# dashboard that reads the files the Swift app writes. Built in parallel with
+# the Swift app; nothing here replaces it yet. See README.md.
+[workspace]
+resolver = "3"
+members = ["crates/netra-core", "crates/netra-dashboard"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+netra-core = { path = "crates/netra-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+gpui = "=0.2.2"

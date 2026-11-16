@@ -1,0 +1,16 @@
+[package]
+name = "netra-dashboard"
+description = "A GPUI dashboard window over Netra's recorded usage and limits (macOS only for now)."
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "netra-dashboard"
+path = "src/main.rs"
+
+[dependencies]
+netra-core.workspace = true
+gpui.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
