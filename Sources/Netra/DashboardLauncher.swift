@@ -103,6 +103,14 @@ final class DashboardLauncher {
         }
     }
 
+    /// Closes the window if it is open. Called when Netra quits.
+    func closeWindow() {
+        if let process = launchedProcess, process.isRunning { process.terminate() }
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleIdentifier) {
+            app.terminate()
+        }
+    }
+
     /// Only a build assembled without the Rust toolchain lacks the window;
     /// releases refuse to build that way.
     private func explainMissingWindow() {
