@@ -340,9 +340,11 @@ The app shows a quiet notice in its footer when a newer release exists.
 2.0 replaces the dashboard window with a new one that is its own app inside
 `Netra.app`. Upgrade the usual way; nothing needs to be moved or converted.
 
-- **Your data stays.** The usage history, saved limits, managed accounts, and
-  Keychain items are read as they are. Nothing in
-  `~/Library/Application Support/Netra` is rewritten by the upgrade.
+- **Your data stays.** Saved limits, managed accounts, and Keychain items are
+  read as they are. Versions before the recorded usage history (1.4.0 and
+  earlier) get one on first launch: it starts from the days in the last
+  saved snapshot, then a full read of the logs fills in and corrects the
+  rest. All of this happens by itself when the new version first opens.
 - **Your settings stay.** The old single menu-bar label choice becomes the
   matching new label (icon plus items); every other setting carries over.
   One difference: the highest-usage percent now follows the "bars show used

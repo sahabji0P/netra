@@ -112,10 +112,14 @@ final class UsageStore {
         guard startsAutomatically else { return }
         Task { [weak self] in
             guard let self else { return }
-            if let cached = await cache.load(), snapshot == nil {
-                snapshot = cached
-                if state != .refreshing {
-                    state = .stale
+            if let cached = await cache.load() {
+                // An upgrade from a version without the recorded history.
+                await ledger.seedIfEmpty(from: cached.daily)
+                if snapshot == nil {
+                    snapshot = cached
+                    if state != .refreshing {
+                        state = .stale
+                    }
                 }
             }
             await refresh()

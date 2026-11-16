@@ -196,6 +196,27 @@ actor UsageLedger {
     /// a day changed. A file that cannot be read or decoded is refused by
     /// throwing before anything is touched. Returns what changed and every
     /// recorded day afterwards.
+    /// Starts an empty history from the days of the last saved snapshot.
+    ///
+    /// Netra before 2.0 kept no history, only that snapshot. Upgrading must
+    /// not lose a day the snapshot still holds but whose logs were removed
+    /// since, so the first launch records the snapshot's days before it
+    /// scans. A history that already holds anything is left alone, and no
+    /// complete scan is claimed, so the scan that follows still reads every
+    /// log and corrects whatever it can.
+    @discardableResult
+    func seedIfEmpty(from rows: [PeriodRow], calendar: Calendar = .current) -> Int {
+        var updated = loaded()
+        guard updated.days.isEmpty, updated.completeScanAt == nil, !rows.isEmpty else { return 0 }
+        let seed = UsageHistory(days: Dictionary(rows.map { ($0.period, $0.parts) }) { first, _ in first })
+        let summary = updated.merge(seed, calendar: calendar)
+        guard summary.added > 0 else { return 0 }
+        save(updated)
+        history = updated
+        log.info("seeded the usage history with \(summary.added, privacy: .public) days from the last snapshot")
+        return summary.added
+    }
+
     func importHistory(
         from url: URL, calendar: Calendar = .current
     ) throws -> (summary: UsageHistory.ImportSummary, rows: [PeriodRow]) {

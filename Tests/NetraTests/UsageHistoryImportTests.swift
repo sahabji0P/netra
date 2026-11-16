@@ -155,6 +155,39 @@ final class UsageHistoryImportTests: XCTestCase {
         XCTAssertEqual(history.days["2026-09-10"]?.first?.cost, 4)
     }
 
+    /// Upgrading from a version with no history: the last snapshot's days
+    /// start it, without claiming a complete scan.
+    func testAnEmptyHistoryIsSeededFromTheLastSnapshotOnce() async throws {
+        let url = folder.appendingPathComponent("seeded-history.json")
+        let ledger = UsageLedger(fileURL: url)
+        let rows = history([
+            "2026-09-10": [agent("claude", tokens: 1_000, cost: 4)],
+            "2026-09-11": [agent("codex", tokens: 500, cost: 2)],
+        ]).rows(calendar: utc)
+
+        let added = await ledger.seedIfEmpty(from: rows, calendar: utc)
+        XCTAssertEqual(added, 2)
+        let seeded = await ledger.current()
+        XCTAssertEqual(seeded.days["2026-09-10"]?.first?.totalTokens, 1_000)
+        XCTAssertNil(seeded.completeScanAt, "the first scan must still read every log")
+        XCTAssertEqual(UsageScan.next(engine: "1", history: seeded), .complete)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+
+        // A history that holds anything is never seeded again.
+        let bigger = history(["2026-09-10": [agent("claude", tokens: 9_000, cost: 40)]]).rows(calendar: utc)
+        let again = await ledger.seedIfEmpty(from: bigger, calendar: utc)
+        XCTAssertEqual(again, 0)
+        let after = await ledger.current()
+        XCTAssertEqual(after.days["2026-09-10"]?.first?.totalTokens, 1_000)
+    }
+
+    func testNothingIsSeededFromAnEmptySnapshot() async throws {
+        let url = folder.appendingPathComponent("unseeded-history.json")
+        let added = await UsageLedger(fileURL: url).seedIfEmpty(from: [], calendar: utc)
+        XCTAssertEqual(added, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
     func testExportRoundTrips() async throws {
         let (ledger, _) = try ledger(holding: stored)
         let exported = folder.appendingPathComponent("export.json")
