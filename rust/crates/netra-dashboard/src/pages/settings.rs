@@ -436,7 +436,7 @@ impl SettingsPage {
                 theme,
                 "Read real limits from Anthropic",
                 Some(
-                    "Uses the sign-in Claude Code keeps in your Keychain. macOS asks for permission once. \
+                    "Uses the sign-in Claude Code keeps in your Keychain, read the way Claude Code reads it. \
                      Off, Netra shows what Claude Code last saved."
                         .into(),
                 ),

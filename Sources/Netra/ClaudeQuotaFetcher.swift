@@ -188,7 +188,59 @@ enum ClaudeQuotaFetcher {
         return expiresAt.timeIntervalSince(now) > 5 * 60
     }
 
+    /// Set when `/usr/bin/security` could not read the item quietly (it
+    /// timed out, which is what waiting on a macOS dialog looks like).
+    /// Background refreshes then stop asking it, so a dialog can never
+    /// reappear every minute; a user action tries again.
+    private static let securityToolBlocked = OSAllocatedUnfairLock(initialState: false)
+
+    /// How long the tool may take. A read it is trusted for returns in
+    /// milliseconds; anything slower is a dialog waiting for the user.
+    static let securityToolTimeout: TimeInterval = 3
+
+    /// Reads Claude Code's sign-in the way Claude Code itself does: through
+    /// `/usr/bin/security`. Claude Code creates the item with that tool, so
+    /// the tool is on the item's access list and the read needs no consent,
+    /// whatever Netra's own code signature is. Reading through
+    /// Security.framework instead requires Netra to be on that list, which
+    /// macOS asks the user about again for every differently signed build
+    /// and whenever the item is recreated.
+    static func readWithSecurityTool(
+        allowingPrompt: Bool,
+        read: (_ service: String, _ account: String) throws -> Data = { service, account in
+            let result = try ProcessRunner.run(
+                SecurityCommandKeychain.tool, ["find-generic-password", "-a", account, "-s", service, "-w"],
+                timeout: securityToolTimeout
+            )
+            if result.timedOut { throw SecretStoreError.unavailable }
+            guard result.status == 0 else { throw SecretStoreError.failed(result.status) }
+            var text = String(decoding: result.stdout, as: UTF8.self)
+            if text.hasSuffix("\n") { text.removeLast() }
+            return SecurityCommandKeychain.decodeSecret(text)
+        }
+    ) -> Data? {
+        if !allowingPrompt, securityToolBlocked.withLock({ $0 }) { return nil }
+        let session = ClaudeAccountSession.current()
+        do {
+            let data = try read(session.keychainService, session.keychainAccount)
+            securityToolBlocked.withLock { $0 = false }
+            return data
+        } catch SecretStoreError.unavailable {
+            securityToolBlocked.withLock { $0 = true }
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
     private static func readCredentials(allowingPrompt: Bool) throws -> Credentials {
+        if let data = readWithSecurityTool(allowingPrompt: allowingPrompt) {
+            let credentials = try credentials(fromKeychainData: data)
+            credentialCache.withLock { $0 = credentials }
+            return credentials
+        }
+        // The tool could not read it (an item it was not created with):
+        // fall back to asking the Keychain as Netra.
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
