@@ -163,9 +163,12 @@ itself caches in `~/.claude.json` — including the model-scoped weekly bucket
 and your plan tier, with no Keychain access and no network. Turn on **Live
 Claude limits** in Settings to fetch fresh numbers directly from Anthropic on
 every refresh using the sign-in Claude Code already keeps in the Keychain.
-macOS asks only when you turn it on or click **Allow Keychain access** (choose
-"Always Allow"); background refreshes read silently and never show the
-password dialog. The token is kept in memory only and is only ever sent to
+Netra reads it the way Claude Code does, through macOS's own `security` tool,
+which that item already trusts, so there is normally no password dialog at
+all. Only if that read is not possible does Netra ask the Keychain itself;
+then macOS asks once, when you turn the setting on or click **Allow Keychain
+access** (choose "Always Allow"), and never from a background refresh. The
+token is kept in memory only and is only ever sent to
 api.anthropic.com. Only when neither source is available does Claude fall
 back to a clearly-labelled local estimate (current 5-hour block versus your
 own heaviest recent block, re-read every five minutes).
