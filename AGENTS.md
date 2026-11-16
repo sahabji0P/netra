@@ -50,8 +50,8 @@ instructions.
   sign-in, locks, and swap), `AccountSwitcher.swift` (the serialized actor that
   performs captures, switches, sign-ins, and parked-limit reads), and
   `AccountStore.swift` (the `@MainActor` facade the UI observes).
-  `AccountsViews.swift` and `DashboardAccountsView.swift` are the popover and
-  Settings surfaces.
+  `AccountsViews.swift` is the popover's switcher; the Accounts page is in
+  the GPUI window (`rust/crates/netra-dashboard/src/pages/accounts.rs`).
 - `AwakeController.swift`, `LaunchAtLogin.swift`, and `UpdateChecker.swift` wrap
   macOS or distribution services.
 - `Tests/NetraTests/` contains XCTest contract tests and captured fixtures for
@@ -60,6 +60,20 @@ instructions.
 - `run.sh` builds, signs, and restarts a development build. `scripts/` assembles
   and publishes the distributable app, and holds the ccusage version check
   and the git hook that runs it. `packaging/` contains shipped assets.
+- `rust/` is a Cargo workspace that holds Netra's main window:
+  `netra-core` (no UI or macOS API) reads `usage-history.json`,
+  `snapshot.json` and `dashboard-state.json` and ports the aggregation,
+  limit, palette, and format rules; `netra-dashboard` is the GPUI app over
+  it (Usage, Subscriptions, Accounts, and the settings pages).
+  `scripts/build-app.sh` nests it in `Netra.app` as
+  `Contents/Helpers/Netra Dashboard.app`. Swift stays the source of truth
+  and the only writer. There is no SwiftUI dashboard any more: the Swift app
+  is the menu bar, popover, island, and engine. See `rust/README.md`.
+- `docs/dashboard-bridge.md` is the contract between the two processes:
+  the state file the Swift app writes for the window, the command files the
+  window drops for the Swift app, and the menu-bar label model.
+- `scripts/make-icon.swift` draws the app icon; `scripts/make-icon.sh`
+  regenerates `packaging/AppIcon.icns` from it.
 
 ## Architecture and implementation rules
 
@@ -121,6 +135,12 @@ instructions.
     and `rename`, verify `tokens.account_id` afterwards, and restart the shared
     `codex app-server daemon` only when `daemon version` says it is running.
   - No automatic account rotation to get around limits.
+- The GPUI window never writes Netra's data, preferences, or sign-ins, and
+  no secret crosses the bridge. It asks through `commands/` and the Swift
+  app validates and executes; text that could be a secret (a token) is typed
+  into a prompt the Swift app shows. A change to either side of the bridge
+  updates `docs/dashboard-bridge.md`, the Swift tests, and the Rust fixture
+  (`rust/crates/netra-core/tests/fixtures/dashboard-state.json`) together.
 - Keep `ccusage-bin` pinned and offline-first. Do not replace or upgrade the
   binary, change its license bundle, or alter pricing provenance without
   explicit approval and contract verification.
@@ -167,9 +187,11 @@ Run commands from the repository root.
 - `scripts/check-ccusage.sh` — fail when `ccusage-bin` is behind the latest
   ccusage on npm. The `pre-push` hook (`git config core.hooksPath
   scripts/git-hooks`) runs it for pushes to `master`; `release.sh` runs it too.
+- `cd rust && cargo test --workspace && cargo clippy --workspace --all-targets`
+  — the Rust core and GPUI dashboard, after editing `rust/`.
 - `git diff --check` — check every change for whitespace errors.
 - `NETRA_RENDER_DIR=/tmp/netra-previews swift test --filter AccountsRenderPreview`
-  — render the account switcher (popover, Accounts page, Subscriptions) with
+  — render the popover's account switcher with
   synthetic accounts. `NETRA_ACCOUNTS_LIVE=1 swift test --filter
   AccountsLiveProbe` probes the real `security` tool on a throwaway item and
   reads (never writes) the live sign-ins. No test may write Claude Code's or

@@ -26,20 +26,19 @@ struct NetraApp: App {
     @State private var desktopConfetti = DesktopConfetti()
     @State private var accounts: AccountStore
     @State private var awake: AwakeController
-    @State private var dashboardNavigation: DashboardNavigation
     @State private var island: IslandCoordinator
+    @State private var bridge: DashboardBridge
 
     init() {
         let preferences = AppPreferences()
         let confetti = DesktopConfetti()
         let accounts = AccountStore()
         let awake = AwakeController()
-        let navigation = DashboardNavigation()
         let store = UsageStore(preferences: preferences, accounts: accounts)
         let updates = UpdateChecker()
         let island = IslandCoordinator(
             store: store, preferences: preferences, accounts: accounts,
-            awake: awake, dashboardNavigation: navigation
+            awake: awake
         )
         // A switch refreshes limits at once, for the account now signed in.
         accounts.onSwitch = { [weak store, weak island] provider in
@@ -59,10 +58,17 @@ struct NetraApp: App {
         _desktopConfetti = State(initialValue: confetti)
         _accounts = State(initialValue: accounts)
         _awake = State(initialValue: awake)
-        _dashboardNavigation = State(initialValue: navigation)
         _island = State(initialValue: island)
+        let bridge = DashboardBridge(
+            preferences: preferences, store: store, accounts: accounts, updates: updates
+        )
+        DashboardLauncher.shared.bridge = bridge
+        _bridge = State(initialValue: bridge)
         // The panel needs a finished launch; the main queue runs after it.
-        DispatchQueue.main.async { island.start() }
+        DispatchQueue.main.async {
+            island.start()
+            bridge.start()
+        }
     }
 
     var body: some Scene {
@@ -72,133 +78,22 @@ struct NetraApp: App {
                 awake: awake,
                 updates: updates,
                 preferences: preferences,
-                dashboardNavigation: dashboardNavigation,
                 accounts: accounts
             )
         } label: {
-            Group {
-                if preferences.menuBarDisplayMode == .limitBars, let bars = menuBarLimitBars {
-                    Image(nsImage: MenuBarIcon.bars(
-                        top: bars.top, bottom: bars.bottom, awake: awake.isAwake
-                    ))
-                } else {
-                    Image(systemName: awake.isAwake ? "eye.fill" : "eye")
-                }
-                if let status = menuBarStatus {
-                    Text(status)
-                }
-            }
-            .modifier(IslandWindowBridge(island: island))
+            let label = menuBarLabel
+            Image(nsImage: MenuBarLabelRenderer.image(label))
+                .accessibilityLabel(label.accessibilityDescription)
         }
         .menuBarExtraStyle(.window)
-
-        Window("Netra", id: "dashboard") {
-            DashboardView(
-                store: store,
-                preferences: preferences,
-                navigation: dashboardNavigation,
-                accounts: accounts
-            )
-        }
-        .defaultSize(width: 980, height: 720)
-        .windowResizability(.contentMinSize)
     }
 
-    private var menuBarStatus: String? {
-        guard let snapshot = store.snapshot else { return nil }
-        switch preferences.menuBarDisplayMode {
-        case .iconOnly:
-            return nil
-        case .todayCost:
-            let cost = snapshot.currentRow(for: .today)
-                .filtered(hidingProviders: preferences.hiddenMenuProviders).cost
-            return cost > 0 ? Format.cost(cost) : nil
-        case .todayTokens:
-            let tokens = snapshot.currentRow(for: .today)
-                .filtered(hidingProviders: preferences.hiddenMenuProviders).totalTokens
-            return tokens > 0 ? Format.tokens(tokens) : nil
-        case .highestProviderLimit:
-            let highest = limitsForMenuBar(snapshot).compactMap(\.mostConstrained?.usedPercent).max()
-            return highest.map { "\(Int(min($0, 999).rounded()))%" }
-        case .limitBars:
-            return nil
-        }
-    }
-
-    /// Provider limits the menu bar may summarize; the Claude local estimate
-    /// only stands in when no real quota exists anywhere.
-    private func limitsForMenuBar(_ snapshot: UsageSnapshot) -> [ProviderLimits] {
-        let all = snapshot.providerLimits(order: preferences.orderedLimitProviders)
-            .filter { preferences.isProviderVisibleInMenu($0.agent) }
-        let real = all.filter { !$0.isEstimate }
-        return real.isEmpty ? all : real
-    }
-
-    /// Fill fractions (0...1) for the provider closest to a limit, honouring
-    /// the used/remaining preference.
-    private var menuBarLimitBars: (top: Double, bottom: Double?)? {
-        guard let snapshot = store.snapshot,
-              let limits = limitsForMenuBar(snapshot).max(by: {
-                  ($0.mostConstrained?.usedPercent ?? 0) < ($1.mostConstrained?.usedPercent ?? 0)
-              }),
-              let windows = limits.iconWindows else { return nil }
-        func fill(_ window: QuotaWindow) -> Double {
-            let used = min(max(window.usedPercent, 0), 100) / 100
-            return preferences.barsShowRemaining ? 1 - used : used
-        }
-        return (fill(windows.top), windows.bottom.map(fill))
-    }
-}
-
-/// Template images for the menu-bar label, drawn so they invert correctly
-/// in light and dark menu bars.
-enum MenuBarIcon {
-    static func bars(top: Double, bottom: Double?, awake: Bool) -> NSImage {
-        let size = NSSize(width: 20, height: 16)
-        let image = NSImage(size: size, flipped: true) { _ in
-            let trackWidth: CGFloat = awake ? 14 : 18
-            let x: CGFloat = 1
-            func bar(y: CGFloat, height: CGFloat, fraction: Double) {
-                let track = NSBezierPath(
-                    roundedRect: NSRect(x: x, y: y, width: trackWidth, height: height),
-                    xRadius: height / 2, yRadius: height / 2
-                )
-                NSColor.black.withAlphaComponent(0.3).setFill()
-                track.fill()
-                let width = max(fraction > 0 ? height : 0, trackWidth * CGFloat(min(max(fraction, 0), 1)))
-                let fill = NSBezierPath(
-                    roundedRect: NSRect(x: x, y: y, width: width, height: height),
-                    xRadius: height / 2, yRadius: height / 2
-                )
-                NSColor.black.setFill()
-                fill.fill()
-            }
-            if let bottom {
-                bar(y: 3, height: 4.5, fraction: top)
-                bar(y: 9.5, height: 3.5, fraction: bottom)
-            } else {
-                bar(y: 5.5, height: 5, fraction: top)
-            }
-            if awake {
-                // A small dot marks Keep Awake without a second icon.
-                NSColor.black.setFill()
-                NSBezierPath(ovalIn: NSRect(x: 16.5, y: 6, width: 3.5, height: 3.5)).fill()
-            }
-            return true
-        }
-        image.isTemplate = true
-        image.accessibilityDescription = "Usage limits"
-        return image
-    }
-}
-
-/// Hands the island the scene's `openWindow`, which its panel cannot get on
-/// its own. Lives in the always-present menu-bar label.
-private struct IslandWindowBridge: ViewModifier {
-    let island: IslandCoordinator
-    @Environment(\.openWindow) private var openWindow
-
-    func body(content: Content) -> some View {
-        content.onAppear { island.openWindow = openWindow }
+    /// The menu-bar label for the current snapshot and label settings.
+    private var menuBarLabel: MenuBarLabelModel {
+        MenuBarLabelModel.make(
+            settings: preferences.menuBarLabelSettings,
+            snapshot: store.snapshot,
+            awake: awake.isAwake
+        )
     }
 }

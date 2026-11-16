@@ -12,6 +12,8 @@ scripts/build-app.sh "$VERSION"
 # older /Applications installation that would otherwise remain visible while
 # the newly-built executable exits or launches invisibly behind it.
 pkill -x Netra 2>/dev/null || true
+# The GPUI dashboard from the previous build would keep running old code.
+pkill -x netra-dashboard 2>/dev/null || true
 sleep 0.5
 open -n "$APP"
 sleep 1

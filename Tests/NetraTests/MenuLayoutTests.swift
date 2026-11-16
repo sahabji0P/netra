@@ -24,8 +24,7 @@ final class MenuLayoutTests: XCTestCase {
             ),
             awake: AwakeController(),
             updates: UpdateChecker(),
-            preferences: preferences,
-            dashboardNavigation: DashboardNavigation()
+            preferences: preferences
         )
         let hostingView = NSHostingView(rootView: root)
         let size = hostingView.fittingSize

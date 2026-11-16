@@ -11,27 +11,21 @@ final class IslandCoordinator {
     private let preferences: AppPreferences
     private let accounts: AccountStore
     private let awake: AwakeController
-    private let dashboardNavigation: DashboardNavigation
     private let queue = IslandActivityQueue()
     private var watcher = IslandLimitWatcher()
     private var controller: IslandController?
     private var lastAwakeMode: AwakeController.Mode
-    /// Set from a SwiftUI scene, since the island's panel has no scene of its
-    /// own to open windows from.
-    var openWindow: OpenWindowAction?
 
     init(
         store: UsageStore,
         preferences: AppPreferences,
         accounts: AccountStore,
-        awake: AwakeController,
-        dashboardNavigation: DashboardNavigation
+        awake: AwakeController
     ) {
         self.store = store
         self.preferences = preferences
         self.accounts = accounts
         self.awake = awake
-        self.dashboardNavigation = dashboardNavigation
         self.lastAwakeMode = awake.mode
     }
 
@@ -112,10 +106,8 @@ final class IslandCoordinator {
     }
 
     private func openDashboard(_ section: DashboardSection) {
-        dashboardNavigation.selection = section
         controller?.collapse()
-        openWindow?(id: "dashboard")
-        NSApp.activate(ignoringOtherApps: true)
+        DashboardLauncher.shared.open(section)
     }
 
     // MARK: Observation

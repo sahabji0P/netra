@@ -4,13 +4,11 @@ import SwiftUI
 /// The menu-bar popover. Reading order follows what a subscription user
 /// checks first: limits and resets, then what the period cost, then actions.
 struct MenuView: View {
-    @Environment(\.openWindow) private var openWindow
 
     @Bindable var store: UsageStore
     @Bindable var awake: AwakeController
     var updates: UpdateChecker
     var preferences: AppPreferences
-    var dashboardNavigation: DashboardNavigation
 
     // Internal so the focused chart extension can share the selected period.
     @State var tab: PeriodTab = .today
@@ -601,8 +599,7 @@ struct MenuView: View {
     }
 
     func showDashboard(_ section: DashboardSection) {
-        dashboardNavigation.selection = section
-        openWindow(id: "dashboard")
+        DashboardLauncher.shared.open(section)
         NSApp.activate(ignoringOtherApps: true)
     }
 

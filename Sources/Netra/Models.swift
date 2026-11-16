@@ -529,6 +529,16 @@ struct UsageSnapshot: Codable, Sendable {
         monthly = totals(by: keys.month)
     }
 
+    /// The same snapshot over a different set of recorded days: weeks and
+    /// months are summed again; freshness, limits and block are kept.
+    func replacingDays(_ days: [PeriodRow], calendar: Calendar = .current) -> UsageSnapshot {
+        UsageSnapshot(
+            fetchedAt: fetchedAt, daily: days, activeBlock: activeBlock,
+            codexQuota: codexQuota, claudeQuota: claudeQuota, cursorQuota: cursorQuota,
+            calendar: calendar
+        )
+    }
+
     /// ccusage's daily rows as normalized rows. Rows whose period is not a
     /// day key are dropped rather than guessed at.
     static func dayRows(from report: CCUnifiedReport, calendar: Calendar = .current) -> [PeriodRow] {

@@ -3,7 +3,7 @@ import SwiftUI
 import XCTest
 @testable import Netra
 
-/// Dev-only visual QA: renders the popover and dashboard with live local data
+/// Dev-only visual QA: renders the popover with live local data
 /// into PNGs. Runs only when NETRA_RENDER_DIR is set, e.g.
 /// NETRA_RENDER_DIR=/tmp/netra-previews swift test --filter RenderPreviewHarness
 @MainActor
@@ -39,17 +39,12 @@ final class RenderPreviewHarness: XCTestCase {
         )
         await store.refresh()
         XCTAssertNotNil(store.snapshot, "live ccusage scan should produce a snapshot")
-        // Show the Website panel configured (set after the refresh, so
-        // nothing is published).
-        preferences.websitePublishEnabled = true
-        preferences.websiteEndpoint = "https://example.com/api/usage"
 
         let menu = MenuView(
             store: store,
             awake: AwakeController(),
             updates: UpdateChecker(),
             preferences: preferences,
-            dashboardNavigation: DashboardNavigation(),
             rendersFullHeight: true
         )
         render(menu, name: "menu", outputDir: outputDir)
@@ -67,24 +62,6 @@ final class RenderPreviewHarness: XCTestCase {
         .frame(width: 420, height: 110)
         render(icons, name: "menubar-icons", outputDir: outputDir)
 
-        let dashboard = DashboardUsageView(store: store)
-            .frame(width: 1100, height: 1700)
-        render(dashboard, name: "dashboard-usage", outputDir: outputDir)
-
-        let navigation = DashboardNavigation(selection: .subscriptions)
-        render(
-            DashboardSubscriptionsView(store: store, preferences: preferences, navigation: navigation)
-                .frame(width: 1100, height: 1000),
-            name: "dashboard-subscriptions", outputDir: outputDir
-        )
-        for section in [DashboardSection.menuBar, .limits, .providers, .general] {
-            render(
-                DashboardSettingsView(section: section, preferences: preferences, store: store)
-                    .frame(width: 860, height: 1500),
-                name: "settings-\(section.rawValue)", outputDir: outputDir
-            )
-        }
-
         // A representative full-screen confetti + banner frame, to eyeball the
         // celebration look without waiting for a real reset.
         let celebration = ZStack {
@@ -100,9 +77,6 @@ final class RenderPreviewHarness: XCTestCase {
         }
         .frame(width: 900, height: 600)
         render(celebration, name: "desktop-confetti", outputDir: outputDir)
-        // DashboardSettingsView is not rendered here: its notification-status
-        // polling calls UNUserNotificationCenter, which throws outside a real
-        // app bundle. Verify Settings in the running app instead.
     }
 
     private func render(_ view: some View, name: String, outputDir: String) {

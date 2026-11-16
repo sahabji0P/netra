@@ -47,6 +47,60 @@ struct UsageHistory: Codable, Equatable, Sendable {
         }
     }
 
+    /// What folding another history file in changed, by day.
+    struct ImportSummary: Equatable, Sendable {
+        var added = 0
+        var updated = 0
+        var unchanged = 0
+
+        var changedAnything: Bool { added > 0 || updated > 0 }
+
+        var message: String {
+            func days(_ count: Int) -> String { count == 1 ? "1 day" : "\(count) days" }
+            if !changedAnything {
+                return unchanged == 0 ? "The file holds no usage." : "Nothing new: \(days(unchanged)) already recorded."
+            }
+            var parts = ["Added \(days(added))"]
+            if updated > 0 { parts.append("updated \(updated)") }
+            if unchanged > 0 { parts.append("\(unchanged) unchanged") }
+            return parts.joined(separator: ", ") + "."
+        }
+    }
+
+    /// Folds another history (an exported file, another Mac's copy) in, one
+    /// day at a time. An imported entry is taken only when the day has none
+    /// for that agent or the file's carries strictly more tokens. This is
+    /// stricter than a fresh reading on purpose: a reading of the logs with
+    /// equal tokens is the newest pricing, but a file with equal tokens may
+    /// carry older prices, and for days whose logs are gone nothing would
+    /// ever correct them. Its `engine` and `completeScanAt` are not adopted.
+    /// Keys that are not days, and entries with negative or non-finite
+    /// values, are skipped.
+    mutating func merge(_ other: UsageHistory, calendar: Calendar = .current) -> ImportSummary {
+        let keys = PeriodKeys.keyer(calendar)
+        var summary = ImportSummary()
+        for day in other.days.keys.sorted() {
+            guard keys.date(fromDay: day) != nil else { continue }
+            let agents = (other.days[day] ?? []).filter {
+                $0.totalTokens >= 0 && $0.cost.isFinite && $0.cost >= 0
+            }
+            let before = days[day]
+            let stored = Dictionary((before ?? []).map { ($0.name, $0.totalTokens) }) { first, _ in first }
+            record(day: day, agents: agents.filter { agent in
+                stored[agent.name].map { agent.totalTokens > $0 } ?? true
+            })
+            let after = days[day]
+            if before == after {
+                summary.unchanged += 1
+            } else if before == nil {
+                summary.added += 1
+            } else {
+                summary.updated += 1
+            }
+        }
+        return summary
+    }
+
     /// Every recorded day, oldest first.
     func rows(calendar: Calendar = .current) -> [PeriodRow] {
         let keys = PeriodKeys.keyer(calendar)
@@ -129,6 +183,30 @@ actor UsageLedger {
         if updated != before { save(updated) }
         history = updated
         return updated.rows(calendar: calendar)
+    }
+
+    /// Writes a copy of the recorded history to `url`.
+    func export(to url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        try encoder.encode(loaded()).write(to: url, options: .atomic)
+    }
+
+    /// Merges a history file through the recording rule and saves only when
+    /// a day changed. A file that cannot be read or decoded is refused by
+    /// throwing before anything is touched. Returns what changed and every
+    /// recorded day afterwards.
+    func importHistory(
+        from url: URL, calendar: Calendar = .current
+    ) throws -> (summary: UsageHistory.ImportSummary, rows: [PeriodRow]) {
+        let incoming = try JSONDecoder().decode(UsageHistory.self, from: Data(contentsOf: url))
+        var updated = loaded()
+        let summary = updated.merge(incoming, calendar: calendar)
+        if summary.changedAnything {
+            save(updated)
+            history = updated
+        }
+        return (summary, updated.rows(calendar: calendar))
     }
 
     private func loaded() -> UsageHistory {

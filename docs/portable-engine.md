@@ -1,7 +1,12 @@
 # Portable engine: idea and open questions
 
-Status: an idea recorded on 2026-11-15. Nothing here is decided or built. It
-is written down so the discussion can start from the same facts later.
+Status: an idea recorded on 2026-11-15. On 2026-11-16 the first step was
+taken in [`rust/`](../rust/README.md): a `netra-core` crate that reads Netra's
+files and ports the Usage-page sums and limit text rules, and a GPUI app over
+it that is now Netra's main window (macOS only). The Swift app is still the
+engine: it runs ccusage, owns preferences and sign-ins, and carries out every
+change the window asks for ([`dashboard-bridge.md`](dashboard-bridge.md)).
+Moving the engine itself is still undecided; the rest of this note stands.
 
 ## The idea
 
