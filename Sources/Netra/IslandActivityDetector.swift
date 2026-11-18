@@ -211,11 +211,14 @@ extension IslandActivity {
 
     /// A completed switch (`AccountStore.onSwitch`). Time-stamped, because the
     /// same account can be switched back to more than once a session.
-    static func accountSwitched(provider: AccountProvider, accountLabel: String, at now: Date = .now) -> IslandActivity {
+    static func accountSwitched(
+        provider: AccountProvider, accountLabel: String,
+        account: ManagedAccount? = nil, previous: ManagedAccount? = nil, at now: Date = .now
+    ) -> IslandActivity {
         IslandActivity(
             id: "account:\(provider.rawValue):\(accountLabel.lowercased()):\(Int(now.timeIntervalSince1970 * 1000))",
             agent: provider.agent,
-            kind: .accountSwitched(accountLabel: accountLabel),
+            kind: .accountSwitched(accountLabel: accountLabel, account: account, previous: previous),
             createdAt: now
         )
     }
@@ -225,7 +228,11 @@ extension IslandActivity {
     @MainActor
     static func accountSwitched(provider: AccountProvider, in store: AccountStore, at now: Date = .now) -> IslandActivity? {
         guard let account = store.activeAccount(for: provider) else { return nil }
-        return accountSwitched(provider: provider, accountLabel: store.roster.label(for: account), at: now)
+        let previous = store.lastSwitchedFrom[provider].flatMap { $0.id == account.id ? nil : $0 }
+        return accountSwitched(
+            provider: provider, accountLabel: store.roster.label(for: account),
+            account: account, previous: previous, at: now
+        )
     }
 
     /// A keep-awake change; nil when the mode did not change.

@@ -42,7 +42,9 @@ final class IslandRenderPreview: XCTestCase {
             ("limit-unknown", IslandActivity(id: "limit2", agent: "cursor", kind: .limitReached(
                 windowLabel: "included usage", resetsAt: nil, alternative: nil))),
             ("reset", IslandActivity(id: "reset", agent: "codex", kind: .windowReset(title: "Codex is fresh again"))),
-            ("switched", IslandActivity(id: "switch", agent: "claude", kind: .accountSwitched(accountLabel: "Personal"))),
+            ("switched", Self.switchActivity(.claude)),
+            ("switched-codex", Self.switchActivity(.codex)),
+            ("switched-unmanaged", IslandActivity(id: "switch", agent: "claude", kind: .accountSwitched(accountLabel: "Personal"))),
             ("awake-on", IslandActivity(id: "awake", agent: nil, kind: .keepAwake(isOn: true, until: now.addingTimeInterval(4 * 3600)))),
             ("awake-off", IslandActivity(id: "awake-off", agent: nil, kind: .keepAwake(isOn: false, until: nil))),
         ]
@@ -58,6 +60,13 @@ final class IslandRenderPreview: XCTestCase {
         render(
             IslandExpandedContent(snapshot: snapshot, state: .fresh, preferences: preferences),
             name: "island-expanded", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
+        )
+        render(
+            IslandExpandedContent(
+                snapshot: snapshot, state: .fresh, preferences: preferences,
+                accounts: AccountsRenderPreview.previewAccounts(withNotice: false)
+            ),
+            name: "island-expanded-accounts", radius: IslandTheme.expandedBottomRadius, outputDir: outputDir
         )
         let twoProviders = AppPreferences(defaults: defaults)
         twoProviders.setProvider("cursor", visibleInMenu: false)
@@ -101,6 +110,17 @@ final class IslandRenderPreview: XCTestCase {
     }
 
     // MARK: Synthetic data
+
+    /// A switch to the provider's first parked synthetic account, from the
+    /// one in use.
+    static func switchActivity(_ provider: AccountProvider) -> IslandActivity {
+        let accounts = AccountsRenderPreview.previewAccounts(withNotice: false)
+        let target = accounts.parkedAccounts(for: provider)[0]
+        return .accountSwitched(
+            provider: provider, accountLabel: accounts.roster.label(for: target),
+            account: target, previous: accounts.activeAccount(for: provider)
+        )
+    }
 
     static func snapshot(
         now: Date, estimateOnly: Bool = false, claudeUsedWithoutLimits: Bool = false, fetchedAt: Date? = nil

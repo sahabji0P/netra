@@ -258,10 +258,13 @@ plugins, skills, hooks, projects, and history. Only the sign-in changes.
   `codex login`) inside a private, temporary folder, so the account you are
   using is never signed out. Netra imports the new sign-in as soon as it
   lands and deletes the temporary copy.
-- **Switch:** click the account's face and name at the right of a provider's
-  header in the popover, then **Switch** beside the account you want (or use
-  the switch button on a parked account's row on the Subscriptions page). The
-  list shows the room each parked account had when last seen. New sessions use
+- **Switch:** every parked account sits under its provider's limits in the
+  popover with the room it had when last seen; click the switch button on its
+  row. The same rows are in the open notch island, so a switch is a hover and
+  one click from any app, and on the Subscriptions page. The face and name
+  at the right of a provider's header show who is in use; clicking them
+  opens the Accounts page. After a switch the island shows the hand-over:
+  the old account, the new one, and the room the new one has. New sessions use
   the new account at once; sessions already running keep the previous one
   until they restart (the popover says how many are running).
 - **See every account:** parked accounts show their 5-hour and weekly limits

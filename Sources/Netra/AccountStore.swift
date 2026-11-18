@@ -23,6 +23,10 @@ final class AccountStore {
     private(set) var liveIdentities: [AccountProvider: AccountIdentity] = [:]
     /// The provider whose switch is in progress.
     private(set) var switching: AccountProvider?
+    /// The account that switch is going to, so its own row can show progress.
+    private(set) var switchingTo: ManagedAccount.ID?
+    /// The account the last switch moved away from, per provider.
+    private(set) var lastSwitchedFrom: [AccountProvider: ManagedAccount] = [:]
     private(set) var notice: AccountNotice?
     private(set) var pendingSignIn: PendingSignIn?
     private(set) var codexUsesKeyring = false
@@ -139,10 +143,13 @@ final class AccountStore {
     func switchTo(_ account: ManagedAccount) async {
         guard switching == nil else { return }
         switching = account.provider
-        defer { switching = nil }
+        switchingTo = account.id
+        defer { switching = nil; switchingTo = nil }
+        let previous = activeAccount(for: account.provider)
         do {
             let (outcome, roster) = try await switcher.switchTo(account.id)
             self.roster = roster
+            lastSwitchedFrom[account.provider] = previous
             liveIdentities = await switcher.liveIdentities()
             show(AccountNotice(
                 provider: outcome.provider,

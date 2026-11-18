@@ -97,7 +97,7 @@ final class IslandCoordinator {
     }
 
     private func makeController(displayID: CGDirectDisplayID) -> IslandController {
-        let store = store, preferences = preferences
+        let store = store, preferences = preferences, accounts = accounts
         let controller = IslandController(displayID: displayID) {
             IslandCompactHost(store: store, preferences: preferences)
         } expanded: { [weak self] in
@@ -105,12 +105,13 @@ final class IslandCoordinator {
                 content: IslandExpandedView(
                     store: store,
                     preferences: preferences,
+                    accounts: accounts,
                     openDashboard: { self?.openDashboard($0) }
                 ),
                 onHeight: { self?.expandedContentHeight($0, displayID: displayID) }
             )
         } activity: { activity in
-            IslandActivityView(activity: activity)
+            IslandActivityView(activity: activity, showRemaining: preferences.barsShowRemaining)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         controller.sizes.expanded.width = IslandExpandedContent.width
