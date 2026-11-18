@@ -237,9 +237,11 @@ account, and banked reset lives.
 
 It grows for a few seconds when a limit runs hot (your provider-limit alert
 threshold, 80% by default), is reached (with a live countdown to the reset),
-or resets, and when you switch accounts or toggle Keep Awake. Screens without
-a notch get the same wing as a pill at the top center; the pill hides while
-the menu bar is hidden (auto-hide or a fullscreen app). The menu-bar icon
+or resets, and when you switch accounts or toggle Keep Awake. Every connected
+display has its own island: screens without a notch, such as an external
+monitor, get the same wing as a pill at the top center of their menu bar. The
+pill hides while that screen's menu bar is hidden (auto-hide, a fullscreen
+app, or a secondary display when displays don't have separate Spaces). The menu-bar icon
 stays either way, and the island can be turned off in Settings. Claude Code,
 Cursor, GitHub Copilot, and OpenCode show their official marks; Codex shows
 the OpenAI mark (OpenAI publishes no separate Codex vector mark), and other

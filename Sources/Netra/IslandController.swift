@@ -120,7 +120,7 @@ struct IslandPointerTracker: Equatable, Sendable {
     }
 }
 
-/// Owns the notch island window: picks the screen, follows display changes,
+/// Owns the notch island window on one display: follows display changes,
 /// tracks the pointer, and morphs between resting, peek, expanded, and
 /// activity. Content is supplied as three SwiftUI roots; the shell has no
 /// knowledge of usage data.
@@ -152,6 +152,11 @@ final class IslandController {
     @ObservationIgnored var leaveGrace: Duration = .milliseconds(220)
     @ObservationIgnored var defaultActivityDuration: Duration = .seconds(4)
 
+    /// The display this island lives on. Nil picks one itself (the notched
+    /// display, else the primary), for previews and probes; the app makes one
+    /// controller per display.
+    @ObservationIgnored let displayID: CGDirectDisplayID?
+
     @ObservationIgnored let compactContent: () -> AnyView
     @ObservationIgnored let expandedContent: () -> AnyView
     @ObservationIgnored let activityContent: (IslandActivity) -> AnyView
@@ -167,15 +172,17 @@ final class IslandController {
 
     init<Compact: View, Expanded: View, Activity: View>(
         sizes: IslandSizes = .standard,
+        displayID: CGDirectDisplayID? = nil,
         @ViewBuilder compact: @escaping () -> Compact,
         @ViewBuilder expanded: @escaping () -> Expanded,
         @ViewBuilder activity: @escaping (IslandActivity) -> Activity
     ) {
         self.sizes = sizes
+        self.displayID = displayID
         self.compactContent = { AnyView(compact()) }
         self.expandedContent = { AnyView(expanded()) }
         self.activityContent = { AnyView(activity($0)) }
-        self.layout = Self.currentScreen().map(NotchGeometry.layout(for:))
+        self.layout = Self.currentScreen(displayID).map(NotchGeometry.layout(for:))
             ?? NotchGeometry.layout(for: ScreenDescriptor(
                 frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
                 safeAreaTop: 0, menuBarHeight: NotchGeometry.fallbackBarHeight
@@ -246,6 +253,10 @@ final class IslandController {
         let until = Date.now.addingTimeInterval(length.timeInterval)
         send(.present(activity, until: until))
     }
+
+    /// Ends `id` here if it is showing or waiting, e.g. because the user
+    /// dismissed it on another display.
+    func endActivity(id: String) { send(.activityEnded(id: id)) }
 
     func expand() { send(.expand) }
     func collapse() { send(.collapse) }
@@ -322,7 +333,7 @@ final class IslandController {
     }
 
     private func relayout() {
-        if let screen = Self.currentScreen() {
+        if let screen = Self.currentScreen(displayID) {
             layout = NotchGeometry.layout(for: screen)
             screenAllowsIsland = NotchGeometry.showsIsland(on: screen)
         }
@@ -337,8 +348,15 @@ final class IslandController {
         updatePointer(.frameChange)
     }
 
-    private static func currentScreen() -> ScreenDescriptor? {
+    /// The controller's own display, or the preferred one when it has none.
+    /// Nil while its display is disconnected: the layout is left as it was
+    /// until the owner hides the controller.
+    private static func currentScreen(_ displayID: CGDirectDisplayID?) -> ScreenDescriptor? {
         let primary = NSScreen.screens.first
+        if let displayID {
+            return NSScreen.screens.first { $0.displayID == displayID }
+                .map { ScreenDescriptor($0, isPrimary: $0 == primary) }
+        }
         let screens = NSScreen.screens.map { ScreenDescriptor($0, isPrimary: $0 == primary) }
         return NotchGeometry.preferredScreenIndex(screens).map { screens[$0] }
     }
@@ -378,6 +396,13 @@ final class IslandController {
         monitors.removeAll()
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         screenObserver = nil
+    }
+}
+
+extension NSScreen {
+    /// The display's stable id for as long as it stays connected.
+    var displayID: CGDirectDisplayID? {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
     }
 }
 
