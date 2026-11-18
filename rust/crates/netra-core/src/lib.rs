@@ -11,6 +11,7 @@ pub mod aggregate;
 pub mod bridge;
 pub mod format;
 pub mod history;
+pub mod label;
 pub mod library;
 pub mod limits;
 pub mod model;

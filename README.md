@@ -97,8 +97,12 @@ light and a dark menu bar:
 - **Icon**: Netra's eye, two limit bars (short window and weekly), a gauge
   ring, or none.
 - **Shows**: any of today's cost, today's tokens, this week's or month's
-  cost, the limit percent, the time to its reset, and the session or weekly
-  percent, in the order you choose.
+  cost, the tightest limit, the session or weekly limit, and the time to a
+  reset, in the order you choose. The time to reset counts down to the limit
+  item before it (the tightest window when none comes before it). The page
+  previews the label and shows, row by row, what each item adds right now or
+  why it adds nothing (for example, the provider closest to a limit has no
+  session window).
 - **Style**: plain text, a filled pill, or an outlined pill.
 - **Color**: follow the menu bar, the provider's color, or green, amber, and
   red as a limit fills.

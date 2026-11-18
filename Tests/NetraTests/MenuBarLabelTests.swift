@@ -117,6 +117,23 @@ final class MenuBarLabelTests: XCTestCase {
         XCTAssertEqual(model(settings).texts, ["5h 62%", "7d 36%", "36%", "3d"])
     }
 
+    func testTheCountdownFollowsTheLimitItemBeforeIt() {
+        var settings = MenuBarLabelSettings()
+        settings.limitSource = "claude"
+        settings.items = [.sessionPercent, .resetCountdown]
+        XCTAssertEqual(model(settings).texts, ["5h 38%", "2h 10m"])
+        settings.items = [.weeklyPercent, .todayCost, .resetCountdown]
+        XCTAssertEqual(model(settings).texts, ["7d 64%", "$12.48", "3d"])
+        // Nothing before it: the tightest window (weekly, 64%).
+        settings.items = [.resetCountdown, .sessionPercent]
+        XCTAssertEqual(model(settings).texts, ["3d", "5h 38%"])
+        // The item before it has no window (Codex has no session window):
+        // the tightest window stands in.
+        settings.limitSource = "codex"
+        settings.items = [.sessionPercent, .resetCountdown]
+        XCTAssertEqual(model(settings).texts, ["4d"])
+    }
+
     func testIconsFollowTheLimitSource() {
         var settings = MenuBarLabelSettings()
         settings.limitSource = "claude"

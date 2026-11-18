@@ -2,15 +2,15 @@
 //! preference (or do one thing) and shows the new value at once; the app's
 //! state file confirms it. Nothing is stored by this window.
 
-use chrono::{DateTime, Datelike, Duration, Utc};
+use chrono::Utc;
 use gpui::{
-    AnyElement, Context, Entity, FontWeight, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
+    AnyElement, Context, Div, Entity, FontWeight, IntoElement, ParentElement, PathPromptOptions, Render, SharedString,
     Styled, Subscription, Window, div, prelude::*, px,
 };
 use netra_core::aggregate::{self, UsageRange};
 use netra_core::bridge::{DashboardState, Preferences};
-use netra_core::limits::{self, ProviderLimits};
-use netra_core::snapshot::QuotaWindow;
+use netra_core::label::{self, ItemValue, Label, LabelSettings};
+use netra_core::limits;
 use netra_core::{Library, format, palette, time};
 use serde_json::{Value, json};
 
@@ -25,14 +25,18 @@ use crate::theme::{Theme, alpha};
 
 /// Everything the menu-bar label can show, in the order offered.
 const LABEL_ITEMS: [(&str, &str, &str); 8] = [
-    ("todayCost", "Today's cost", "API-equivalent cost so far today"),
-    ("todayTokens", "Today's tokens", "Tokens processed today"),
-    ("weekCost", "This week's cost", "Cost since the week began"),
-    ("monthCost", "This month's cost", "Cost since the month began"),
-    ("limitPercent", "Limit percent", "The tightest window of the limit source"),
-    ("resetCountdown", "Time to reset", "Until that window resets"),
-    ("sessionPercent", "Session percent", "The short (5-hour) window"),
-    ("weeklyPercent", "Weekly percent", "The weekly window"),
+    ("todayCost", "Today's cost", "API-equivalent cost so far today."),
+    ("todayTokens", "Today's tokens", "Tokens processed today."),
+    ("weekCost", "This week's cost", "Cost since Monday."),
+    ("monthCost", "This month's cost", "Cost since the 1st."),
+    ("limitPercent", "Tightest limit", "Whichever window of the limit source is closest to running out."),
+    ("sessionPercent", "Session limit", "The short session window, such as Claude's 5 hours."),
+    ("weeklyPercent", "Weekly limit", "The weekly window."),
+    (
+        "resetCountdown",
+        "Time to reset",
+        "Counts down to the reset of the limit item before it, or of the tightest window.",
+    ),
 ];
 
 const TOKEN_ALERT_STEPS: [u64; 12] = [
@@ -123,9 +127,8 @@ impl SettingsPage {
     fn menu_bar(&self, theme: &Theme, p: &Preferences, library: &Library, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let now = Utc::now();
         let items = p.strings("menuBarItems");
-        let preview = panel(theme, "Preview", Some("How the label reads in your menu bar".into()))
-            .child(label_preview(theme, p, library, now, false))
-            .child(label_preview(theme, p, library, now, true));
+        let settings = label_settings(p);
+        let label = Label::new(&settings, &library.rows, library.snapshot.as_deref(), time::today(), now);
 
         let look = panel(theme, "Look", None)
             .child(setting_row(
@@ -179,12 +182,33 @@ impl SettingsPage {
             items.iter().filter_map(|id| LABEL_ITEMS.iter().find(|item| item.0 == id)).collect();
         let hidden: Vec<&(&str, &str, &str)> =
             LABEL_ITEMS.iter().filter(|item| !items.iter().any(|i| i == item.0)).collect();
+        // Only ids this page knows are written back, so an order never
+        // depends on one it cannot show.
+        let order: Vec<String> = shown.iter().map(|item| item.0.to_string()).collect();
         let count = shown.len();
-        let mut rows: Vec<AnyElement> = Vec::new();
+        let group = |text: &'static str| {
+            div().pt(px(4.)).text_size(px(10.5)).font_weight(FontWeight::SEMIBOLD).text_color(theme.faint).child(text)
+        };
+        let mut rows: Vec<AnyElement> = vec![
+            label_preview(theme, p, &label, &order, false).into_any_element(),
+            label_preview(theme, p, &label, &order, true).into_any_element(),
+            group("IN YOUR MENU BAR, LEFT TO RIGHT").into_any_element(),
+        ];
+        if count == 0 {
+            rows.push(
+                div()
+                    .text_size(px(11.5))
+                    .text_color(theme.muted)
+                    .child("Only the icon. Turn something on below to add it.")
+                    .into_any_element(),
+            );
+        }
         for (index, item) in shown.into_iter().chain(hidden).enumerate() {
             let on = index < count;
             let id = item.0;
-            let current = items.clone();
+            // A row that is off is judged as if it were added at the end.
+            let value = label.item(id, &order[..index.min(count)]);
+            let current = order.clone();
             let flip = on_click(cx, move |this: &mut Self, _, cx| {
                 let mut next = current.clone();
                 if on {
@@ -195,7 +219,7 @@ impl SettingsPage {
                 this.set("menuBarItems", json!(next), cx);
             });
             let mover = |offset: isize, cx: &mut Context<Self>| -> Click {
-                let current = items.clone();
+                let current = order.clone();
                 on_click(cx, move |this: &mut Self, _, cx| {
                     let mut next = current.clone();
                     let target = index as isize + offset;
@@ -205,43 +229,41 @@ impl SettingsPage {
                     }
                 })
             };
-            if index > 0 {
+            if index == count {
+                rows.push(group("NOT SHOWN").into_any_element());
+            } else if index > 0 {
                 rows.push(divider(theme).into_any_element());
             }
+            let controls = div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(4.))
+                .when(on, |d| {
+                    d.child(icon_button(
+                        theme,
+                        ("item-up", index),
+                        "icons/up.svg",
+                        "Move left",
+                        index > 0,
+                        mover(-1, cx),
+                    ))
+                    .child(icon_button(
+                        theme,
+                        ("item-down", index),
+                        "icons/down.svg",
+                        "Move right",
+                        index + 1 < count,
+                        mover(1, cx),
+                    ))
+                })
+                .child(div().w(px(6.)))
+                .child(toggle(theme, ("item", index), on, flip));
             rows.push(
-                setting_row(
-                    theme,
-                    item.1,
-                    Some(item.2.into()),
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(4.))
-                        .when(on, |d| {
-                            d.child(icon_button(
-                                theme,
-                                ("item-up", index),
-                                "icons/up.svg",
-                                "Move left",
-                                index > 0,
-                                mover(-1, cx),
-                            ))
-                            .child(icon_button(
-                                theme,
-                                ("item-down", index),
-                                "icons/down.svg",
-                                "Move right",
-                                index + 1 < count,
-                                mover(1, cx),
-                            ))
-                        })
-                        .child(div().w(px(6.)))
-                        .child(toggle(theme, ("item", index), on, flip)),
-                )
-                .into_any_element(),
+                label_item_row(theme, on.then_some(index + 1), item.1, item.2, &value, controls).into_any_element(),
             );
         }
-        let contents = panel(theme, "Shows", Some("Left to right, in this order".into())).children(rows);
+        let contents = panel(theme, "Shows", Some("Each row shows what it adds right now".into())).children(rows);
 
         let source = panel(theme, "Limit source", None).child(setting_row(
             theme,
@@ -317,10 +339,9 @@ impl SettingsPage {
             ));
 
         vec![
-            preview.into_any_element(),
-            look.into_any_element(),
             contents.into_any_element(),
             source.into_any_element(),
+            look.into_any_element(),
             section_label(theme, "POPOVER").into_any_element(),
             popover.into_any_element(),
         ]
@@ -888,111 +909,148 @@ fn default_folder() -> std::path::PathBuf {
 
 // MARK: Menu-bar label preview
 
-/// The window the limit items read: the limit source's tightest, short or
-/// weekly window.
-fn label_window<'a>(limits: &'a ProviderLimits, item: &str) -> Option<&'a QuotaWindow> {
-    let by_length =
-        |wanted: f64| limits.windows.iter().find(|w| w.duration_seconds.is_some_and(|d| (d - wanted).abs() < 60.0));
-    match item {
-        "sessionPercent" => by_length(5.0 * 3600.0),
-        "weeklyPercent" => by_length(7.0 * 86_400.0),
-        _ => limits.most_constrained(),
+/// The preferences the label's text depends on.
+fn label_settings(p: &Preferences) -> LabelSettings {
+    let mut limit_order = p.strings("limitProviderOrder");
+    for known in limits::DEFAULT_ORDER {
+        if !limit_order.iter().any(|o| o == known) {
+            limit_order.push(known.to_string());
+        }
+    }
+    LabelSettings {
+        limit_source: p.string("menuBarLimitSource", label::CLOSEST_SOURCE),
+        show_remaining: p.bool("barsShowRemaining", false),
+        hidden_providers: p.strings("hiddenMenuProviders").iter().map(|h| h.to_lowercase()).collect(),
+        limit_order,
     }
 }
 
-/// What each label item reads right now, from the same data the app uses.
-/// The app's own drawing is the truth; this is close enough to choose by.
-fn label_text(
-    item: &str,
-    library: &Library,
-    source: Option<&ProviderLimits>,
-    show_remaining: bool,
-    now: DateTime<Utc>,
-) -> Option<String> {
-    let today = time::today();
-    let since = |start: chrono::NaiveDate| library.rows.iter().filter(move |r| r.date >= start && r.date <= today);
-    let percent = |window: &QuotaWindow| {
-        let used = window.used_percent.clamp(0.0, 999.0);
-        format!("{:.0}%", if show_remaining { (100.0 - used).max(0.0) } else { used })
-    };
-    match item {
-        "todayCost" => Some(format::cost(since(today).map(|r| r.cost).sum())),
-        "todayTokens" => Some(format::tokens(since(today).map(|r| r.total_tokens).sum())),
-        "weekCost" => {
-            let monday = today - Duration::days(i64::from(today.weekday().num_days_from_monday()));
-            Some(format::cost(since(monday).map(|r| r.cost).sum()))
-        }
-        "monthCost" => Some(format::cost(since(today.with_day(1).unwrap_or(today)).map(|r| r.cost).sum())),
-        "resetCountdown" => {
-            let reset = source.and_then(|s| s.most_constrained()).and_then(|w| w.resets_at)?;
-            Some(limits::duration((reset - now).num_seconds().max(0) as f64))
-        }
-        _ => source.and_then(|s| label_window(s, item)).map(percent),
-    }
-}
-
-/// A strip that looks like a piece of the menu bar, with the label on it.
-fn label_preview(
+/// One item of the label: its place in the order when it is on, what it is,
+/// and what it adds right now (or why it adds nothing).
+fn label_item_row(
     theme: &Theme,
-    p: &Preferences,
-    library: &Library,
-    now: DateTime<Utc>,
-    dark_bar: bool,
-) -> impl IntoElement {
-    let all = library.snapshot.as_ref().map(|s| ordered_limits(s, p, now)).unwrap_or_default();
-    let wanted = p.string("menuBarLimitSource", "closest");
-    let used = |l: &ProviderLimits| l.most_constrained().map(|w| w.used_percent).unwrap_or(0.0);
-    let source = match wanted.as_str() {
-        "closest" => all.iter().max_by(|a, b| used(a).total_cmp(&used(b))),
-        agent => all.iter().find(|l| l.agent == agent),
+    position: Option<usize>,
+    title: &'static str,
+    detail: &'static str,
+    value: &ItemValue,
+    controls: impl IntoElement,
+) -> Div {
+    let on = position.is_some();
+    let badge = div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(px(18.))
+        .rounded(px(9.))
+        .text_size(px(10.5))
+        .font_weight(FontWeight::SEMIBOLD)
+        .when_some(position, |d, position| d.bg(theme.well).text_color(theme.muted).child(position.to_string()));
+    // What the item draws, as it reads on the menu bar.
+    let chip = match &value.text {
+        Some(text) => div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(5.))
+            .px(px(8.))
+            .py(px(2.5))
+            .rounded(px(6.))
+            .bg(theme.well)
+            .text_size(px(12.))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(if on { theme.text } else { theme.muted })
+            .children(value.agent.as_ref().map(|agent| div().size(px(6.)).rounded(px(3.)).bg(theme.provider(agent))))
+            .child(text.clone()),
+        None => div()
+            .flex_none()
+            .px(px(8.))
+            .py(px(2.5))
+            .rounded(px(6.))
+            .border_1()
+            .border_color(theme.hairline())
+            .text_size(px(11.))
+            .text_color(if on { theme.warning } else { theme.faint })
+            .child("nothing now"),
     };
-    let show_remaining = p.bool("barsShowRemaining", false);
+    let reading = match (&value.agent, &value.window) {
+        (Some(agent), Some(window)) => Some(format!("Reading {}: {window}.", palette::short_name(agent))),
+        _ => None,
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap(px(10.))
+        .child(badge)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w(px(0.))
+                .gap(px(2.))
+                .child(
+                    div()
+                        .text_size(px(12.5))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(if on { theme.text } else { theme.muted })
+                        .child(title),
+                )
+                .child(div().text_size(px(11.5)).text_color(theme.muted).child(detail))
+                .children(reading.map(|r| div().text_size(px(11.)).text_color(theme.faint).child(r)))
+                .children(value.reason.as_ref().map(|r| {
+                    div().text_size(px(11.)).text_color(if on { theme.warning } else { theme.faint }).child(r.clone())
+                })),
+        )
+        .child(chip)
+        .child(controls)
+}
+
+/// A strip that looks like a piece of the menu bar, with the label on it,
+/// built from the same rules the app draws with.
+fn label_preview(theme: &Theme, p: &Preferences, label: &Label, items: &[String], dark_bar: bool) -> impl IntoElement {
     let compact = p.bool("menuBarCompact", false);
     let style = p.string("menuBarStyle", "plain");
-    let texts: Vec<String> = p
-        .strings("menuBarItems")
-        .iter()
-        .filter_map(|item| label_text(item, library, source, show_remaining, now))
-        .collect();
+    let texts = label.texts(items);
 
     let bar = if dark_bar { gpui::rgb(0x1D1D20) } else { gpui::rgb(0xE9E9EC) };
     let bar_ink = if dark_bar { gpui::rgb(0xF2F2F3) } else { gpui::rgb(0x1B1B1A) };
     let tint = match p.string("menuBarTint", "mono").as_str() {
-        "provider" => source.map(|s| theme.provider(&s.agent)).unwrap_or(bar_ink),
-        "status" => source.map(|s| theme.status(used(s))).unwrap_or(bar_ink),
+        "provider" => label.source.as_ref().map(|s| theme.provider(&s.agent)).unwrap_or(bar_ink),
+        "status" => label.tightest().map(|w| theme.status(w.used_percent)).unwrap_or(bar_ink),
         _ => bar_ink,
     };
     // On a filled pill the text is cut out of it; elsewhere it wears the tint.
     let (fill, ink) = if style == "pill" { (Some(tint), bar) } else { (None, tint) };
 
     let size = if compact { 11. } else { 12.5 };
+    let eye = || icon("icons/eye.svg", size + 3., ink).into_any_element();
+    let line = |fraction: f64, h: f32| {
+        let f = fraction.clamp(0.0, 1.0) as f32;
+        div()
+            .w(px(16.))
+            .h(px(h))
+            .rounded(px(h))
+            .bg(alpha(ink, 0.3))
+            .child(div().h_full().w(gpui::relative(f)).when(f > 0., |d| d.min_w(px(h))).rounded(px(h)).bg(ink))
+    };
+    // Without limits to draw, the bars and the ring fall back to the eye.
     let mark: Option<AnyElement> = match p.string("menuBarIcon", "eye").as_str() {
-        "eye" => Some(icon("icons/eye.svg", size + 3., ink).into_any_element()),
-        "ring" => Some(icon("icons/ring.svg", size + 2., ink).into_any_element()),
-        "bars" => {
-            let fraction = |item: &str| {
-                source.and_then(|s| label_window(s, item)).map(|w| (w.used_percent / 100.0).clamp(0.0, 1.0) as f32)
-            };
-            let line = |f: f32, h: f32| {
-                div()
-                    .w(px(16.))
-                    .h(px(h))
-                    .rounded(px(h))
-                    .bg(alpha(ink, 0.3))
-                    .child(div().h_full().w(gpui::relative(f)).min_w(px(h)).rounded(px(h)).bg(ink))
-            };
-            Some(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(line(fraction("sessionPercent").or(fraction("limitPercent")).unwrap_or(0.4), 4.))
-                    .child(line(fraction("weeklyPercent").unwrap_or(0.2), 3.))
-                    .into_any_element(),
-            )
-        }
+        "eye" => Some(eye()),
+        "ring" => Some(match label.ring_fraction() {
+            Some(_) => icon("icons/ring.svg", size + 2., ink).into_any_element(),
+            None => eye(),
+        }),
+        "bars" => Some(match label.bar_fractions() {
+            Some((top, Some(bottom))) => {
+                div().flex().flex_col().gap(px(2.)).child(line(top, 4.)).child(line(bottom, 3.)).into_any_element()
+            }
+            Some((top, None)) => line(top, 5.).into_any_element(),
+            None => eye(),
+        }),
         _ => None,
     };
+    // Never an empty label: the eye stands in.
     let empty = mark.is_none() && texts.is_empty();
 
     let label = div()

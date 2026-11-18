@@ -171,6 +171,9 @@ struct MenuBarLabelModel: Equatable, Sendable {
         }
 
         var texts: [String] = []
+        // The window the countdown counts to: the one the limit item before
+        // it reads, or the tightest when none comes before it.
+        var countdownWindow = tightest
         for item in settings.items {
             let text: String?
             switch item {
@@ -191,14 +194,19 @@ struct MenuBarLabelModel: Equatable, Sendable {
                 }
             case .limitPercent:
                 text = tightest.map(percent)
+                countdownWindow = tightest ?? countdownWindow
             case .resetCountdown:
-                text = tightest?.resetsAt.flatMap { reset in
+                text = countdownWindow?.resetsAt.flatMap { reset in
                     reset > now ? LimitText.duration(reset.timeIntervalSince(now)) : nil
                 }
             case .sessionPercent:
-                text = limits.flatMap(sessionWindow).map { "\(shortLength($0)) \(percent($0))" }
+                let window = limits.flatMap(sessionWindow)
+                text = window.map { "\(shortLength($0)) \(percent($0))" }
+                countdownWindow = window ?? countdownWindow
             case .weeklyPercent:
-                text = limits.flatMap(weeklyWindow).map { "7d \(percent($0))" }
+                let window = limits.flatMap(weeklyWindow)
+                text = window.map { "7d \(percent($0))" }
+                countdownWindow = window ?? countdownWindow
             }
             if let text { texts.append(text) }
         }
