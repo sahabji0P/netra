@@ -104,6 +104,8 @@ struct IslandCostModel: Equatable {
 struct IslandExpandedView: View {
     var store: UsageStore
     var preferences: AppPreferences
+    /// Managed accounts; nil leaves the account switcher out.
+    var accounts: AccountStore? = nil
     /// Opens a page of the main window. The integration supplies it;
     /// without one the view asks the launcher itself, as the popover does.
     var openDashboard: ((DashboardSection) -> Void)? = nil
@@ -112,6 +114,7 @@ struct IslandExpandedView: View {
         IslandExpandedContent(
             snapshot: store.snapshot, state: store.state, preferences: preferences,
             claudeKeychainNeedsApproval: store.claudeKeychainNeedsApproval,
+            accounts: accounts,
             openDashboard: open
         )
     }
@@ -127,6 +130,7 @@ struct IslandExpandedContent: View {
     var state: UsageStore.State
     var preferences: AppPreferences
     var claudeKeychainNeedsApproval = false
+    var accounts: AccountStore? = nil
     var openDashboard: (DashboardSection) -> Void = { _ in }
 
     @State private var range = IslandCostRange.today
@@ -146,6 +150,7 @@ struct IslandExpandedContent: View {
                 } else {
                     grid(cards, now: context.date)
                 }
+                accountsTile
                 if let missing = IslandData.missingClaudeReason(
                     snapshot, cards: cards, preferences: preferences, keychainNeedsApproval: claudeKeychainNeedsApproval
                 ) {
@@ -192,6 +197,42 @@ struct IslandExpandedContent: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Parked accounts of every provider that has one, each with its own
+    /// switch button, so a switch is a hover and one click from any app.
+    /// Inline buttons only: the island never becomes key, so a menu or a
+    /// popover would not work here.
+    @ViewBuilder
+    private var accountsTile: some View {
+        if let accounts {
+            let providers = AccountProvider.allCases.filter {
+                preferences.isProviderVisibleInMenu($0.agent) && !accounts.parkedAccounts(for: $0).isEmpty
+            }
+            if !providers.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(providers, id: \.self) { provider in
+                        HStack(spacing: 5) {
+                            ProviderLogo(agent: provider.agent, size: 11)
+                            Text(accounts.activeAccount(for: provider).map {
+                                "\(AgentPalette.shortName(provider.agent)) · \(accounts.roster.label(for: $0)) in use"
+                            } ?? AgentPalette.shortName(provider.agent))
+                                .font(.system(size: 10.5, weight: .medium))
+                                .foregroundStyle(IslandTheme.secondaryText)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        ParkedAccountsList(accounts: accounts, provider: provider, showRemaining: preferences.barsShowRemaining)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(11)
+                .background(IslandTheme.card, in: RoundedRectangle(cornerRadius: IslandTheme.tileRadius, style: .continuous))
+            }
+            if let notice = accounts.notice, notice.isError {
+                note([notice.title, notice.detail].compactMap { $0 }.joined(separator: " · "), color: IslandTheme.warning)
+            }
+        }
     }
 
     private func note(_ text: String, color: Color) -> some View {

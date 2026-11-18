@@ -11,8 +11,10 @@ struct IslandActivity: Identifiable, Equatable, Sendable {
         case limitReached(windowLabel: String, resetsAt: Date?, alternative: String?)
         /// A window rolled into a new cycle.
         case windowReset(title: String)
-        /// The live sign-in changed to another saved account.
-        case accountSwitched(accountLabel: String)
+        /// The live sign-in changed to another saved account. `account` is the
+        /// one now in use and `previous` the one it replaced, when known, so
+        /// the island can show the hand-over and the room the new one has.
+        case accountSwitched(accountLabel: String, account: ManagedAccount? = nil, previous: ManagedAccount? = nil)
         case keepAwake(isOn: Bool, until: Date?)
     }
 

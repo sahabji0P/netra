@@ -174,7 +174,7 @@ a style. Item ids:
 | `weekCost` | this week's cost |
 | `monthCost` | this month's cost |
 | `limitPercent` | percent used (or left, following `barsShowRemaining`) of the limit source's tightest window |
-| `resetCountdown` | time until that window resets, e.g. `2h 10m` |
+| `resetCountdown` | time until a window resets, e.g. `2h 10m`: the window the limit item before it reads (`limitPercent`, `sessionPercent` or `weeklyPercent`), or the tightest window when none comes before it |
 | `sessionPercent` | the limit source's short (5-hour) window |
 | `weeklyPercent` | the limit source's weekly window |
 

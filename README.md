@@ -97,8 +97,12 @@ light and a dark menu bar:
 - **Icon**: Netra's eye, two limit bars (short window and weekly), a gauge
   ring, or none.
 - **Shows**: any of today's cost, today's tokens, this week's or month's
-  cost, the limit percent, the time to its reset, and the session or weekly
-  percent, in the order you choose.
+  cost, the tightest limit, the session or weekly limit, and the time to a
+  reset, in the order you choose. The time to reset counts down to the limit
+  item before it (the tightest window when none comes before it). The page
+  previews the label and shows, row by row, what each item adds right now or
+  why it adds nothing (for example, the provider closest to a limit has no
+  session window).
 - **Style**: plain text, a filled pill, or an outlined pill.
 - **Color**: follow the menu bar, the provider's color, or green, amber, and
   red as a limit fills.
@@ -237,9 +241,11 @@ account, and banked reset lives.
 
 It grows for a few seconds when a limit runs hot (your provider-limit alert
 threshold, 80% by default), is reached (with a live countdown to the reset),
-or resets, and when you switch accounts or toggle Keep Awake. Screens without
-a notch get the same wing as a pill at the top center; the pill hides while
-the menu bar is hidden (auto-hide or a fullscreen app). The menu-bar icon
+or resets, and when you switch accounts or toggle Keep Awake. Every connected
+display has its own island: screens without a notch, such as an external
+monitor, get the same wing as a pill at the top center of their menu bar. The
+pill hides while that screen's menu bar is hidden (auto-hide, a fullscreen
+app, or a secondary display when displays don't have separate Spaces). The menu-bar icon
 stays either way, and the island can be turned off in Settings. Claude Code,
 Cursor, GitHub Copilot, and OpenCode show their official marks; Codex shows
 the OpenAI mark (OpenAI publishes no separate Codex vector mark), and other
@@ -256,10 +262,13 @@ plugins, skills, hooks, projects, and history. Only the sign-in changes.
   `codex login`) inside a private, temporary folder, so the account you are
   using is never signed out. Netra imports the new sign-in as soon as it
   lands and deletes the temporary copy.
-- **Switch:** click the account's face and name at the right of a provider's
-  header in the popover, then **Switch** beside the account you want (or use
-  the switch button on a parked account's row on the Subscriptions page). The
-  list shows the room each parked account had when last seen. New sessions use
+- **Switch:** every parked account sits under its provider's limits in the
+  popover with the room it had when last seen; click the switch button on its
+  row. The same rows are in the open notch island, so a switch is a hover and
+  one click from any app, and on the Subscriptions page. The face and name
+  at the right of a provider's header show who is in use; clicking them
+  opens the Accounts page. After a switch the island shows the hand-over:
+  the old account, the new one, and the room the new one has. New sessions use
   the new account at once; sessions already running keep the previous one
   until they restart (the popover says how many are running).
 - **See every account:** parked accounts show their 5-hour and weekly limits

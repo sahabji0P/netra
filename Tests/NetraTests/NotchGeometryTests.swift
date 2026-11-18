@@ -59,6 +59,28 @@ final class NotchGeometryTests: XCTestCase {
         XCTAssertNil(NotchGeometry.preferredScreenIndex([]))
     }
 
+    /// An external display holding the menu bar beside the notched built-in:
+    /// each gets its own island, on its own frame.
+    func testExternalPrimaryAndNotchedBuiltInEachHaveAnIsland() {
+        let screens = [external, notched]
+        XCTAssertTrue(screens.allSatisfy(NotchGeometry.showsIsland(on:)))
+        let frames = screens.map {
+            NotchGeometry.islandFrame(.expanded, layout: NotchGeometry.layout(for: $0), sizes: sizes)
+        }
+        for (screen, frame) in zip(screens, frames) {
+            XCTAssertTrue(screen.frame.contains(frame))
+            XCTAssertEqual(frame.maxY, screen.frame.maxY)
+        }
+        // A secondary display without a menu bar of its own has no place for
+        // the pill; the notched one keeps its island either way.
+        var bare = external
+        bare.menuBarHeight = 0
+        XCTAssertFalse(NotchGeometry.showsIsland(on: bare))
+        var barless = notched
+        barless.menuBarHeight = 0
+        XCTAssertTrue(NotchGeometry.showsIsland(on: barless))
+    }
+
     func testModeFramesShareTopAndNest() {
         for screen in [notched, external] {
             let layout = NotchGeometry.layout(for: screen)

@@ -65,6 +65,7 @@ extension MenuView {
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            parkedAccounts(for: "claude")
             if !preferences.claudeQuotaEnabled || store.claudeKeychainNeedsApproval {
                 Button(preferences.claudeQuotaEnabled ? "Allow Keychain access" : "Use live limits from Anthropic") {
                     preferences.claudeQuotaEnabled = true
@@ -111,6 +112,7 @@ extension MenuView {
             if limits.bankedResetCount > 0 {
                 bankedResets(limits)
             }
+            parkedAccounts(for: limits.agent)
             if let note = limits.note {
                 Label(note, systemImage: "info.circle")
                     .font(.system(size: 10.5))

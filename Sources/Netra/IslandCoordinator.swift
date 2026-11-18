@@ -2,9 +2,10 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Wires the notch island into the app: builds the controller with the real
-/// content views, feeds it live activities, and follows the user's
-/// preference. The menu-bar icon is unaffected.
+/// Wires the notch island into the app: keeps one island on every connected
+/// display (the notch on a notched one, a pill in the menu bar elsewhere),
+/// builds each with the real content views, feeds them live activities, and
+/// follows the user's preference. The menu-bar icon is unaffected.
 @MainActor
 final class IslandCoordinator {
     private let store: UsageStore
@@ -13,7 +14,10 @@ final class IslandCoordinator {
     private let awake: AwakeController
     private let queue = IslandActivityQueue()
     private var watcher = IslandLimitWatcher()
-    private var controller: IslandController?
+    /// One island per connected display while the island is enabled.
+    private var controllers: [CGDirectDisplayID: IslandController] = [:]
+    private var isEnabled = false
+    private var screenObserver: NSObjectProtocol?
     private var lastAwakeMode: AwakeController.Mode
 
     init(
@@ -41,12 +45,12 @@ final class IslandCoordinator {
     // MARK: Events from existing hooks
 
     func resetDetected(_ celebration: ResetCelebration) {
-        guard controller != nil else { return }
+        guard isEnabled else { return }
         queue.enqueue(.windowReset(from: celebration))
     }
 
     func accountSwitched(_ provider: AccountProvider) {
-        if controller != nil, let activity = IslandActivity.accountSwitched(provider: provider, in: accounts) {
+        if isEnabled, let activity = IslandActivity.accountSwitched(provider: provider, in: accounts) {
             queue.enqueue(activity)
         }
     }
@@ -54,12 +58,21 @@ final class IslandCoordinator {
     // MARK: Island lifetime
 
     private func applyPreference() {
-        if preferences.notchIslandEnabled {
-            if controller == nil { controller = makeController() }
-            controller?.show()
+        isEnabled = preferences.notchIslandEnabled
+        if isEnabled {
+            if screenObserver == nil {
+                screenObserver = NotificationCenter.default.addObserver(
+                    forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.reconcileScreens() }
+                }
+            }
+            reconcileScreens()
         } else {
-            controller?.hide()
-            controller = nil
+            if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+            screenObserver = nil
+            controllers.values.forEach { $0.hide() }
+            controllers = [:]
             queue.clear()
             // Re-enabling starts comparing afresh, so nothing that changed
             // while the island was off is announced late.
@@ -67,35 +80,56 @@ final class IslandCoordinator {
         }
     }
 
-    private func makeController() -> IslandController {
-        let store = store, preferences = preferences
-        let controller = IslandController {
+    /// Gives every connected display its island and removes the islands of
+    /// displays that are gone. Each controller hides itself while its own
+    /// display has no place for it (no notch and no menu bar).
+    private func reconcileScreens() {
+        guard isEnabled else { return }
+        let connected = Set(NSScreen.screens.compactMap(\.displayID))
+        for id in controllers.keys where !connected.contains(id) {
+            controllers.removeValue(forKey: id)?.hide()
+        }
+        for id in connected where controllers[id] == nil {
+            let controller = makeController(displayID: id)
+            controllers[id] = controller
+            controller.show()
+        }
+    }
+
+    private func makeController(displayID: CGDirectDisplayID) -> IslandController {
+        let store = store, preferences = preferences, accounts = accounts
+        let controller = IslandController(displayID: displayID) {
             IslandCompactHost(store: store, preferences: preferences)
         } expanded: { [weak self] in
             IslandExpandedHost(
                 content: IslandExpandedView(
                     store: store,
                     preferences: preferences,
+                    accounts: accounts,
                     openDashboard: { self?.openDashboard($0) }
                 ),
-                onHeight: { self?.expandedContentHeight($0) }
+                onHeight: { self?.expandedContentHeight($0, displayID: displayID) }
             )
         } activity: { activity in
-            IslandActivityView(activity: activity)
+            IslandActivityView(activity: activity, showRemaining: preferences.barsShowRemaining)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         controller.sizes.expanded.width = IslandExpandedContent.width
         controller.onActivityDismissed = { [weak self] id in
-            guard let self, queue.current?.id == id else { return }
-            queue.dismissCurrent()
+            guard let self else { return }
+            // Dismissed on one display, it goes from the others too.
+            for (other, controller) in controllers where other != displayID {
+                controller.endActivity(id: id)
+            }
+            if queue.current?.id == id { queue.dismissCurrent() }
         }
         return controller
     }
 
     /// Sizes the expanded island to its content, capped so it never runs off
     /// a short screen; taller content scrolls.
-    private func expandedContentHeight(_ height: CGFloat) {
-        guard let controller else { return }
+    private func expandedContentHeight(_ height: CGFloat, displayID: CGDirectDisplayID) {
+        guard let controller = controllers[displayID] else { return }
         // The island's own screen, below its menu bar or notch.
         let screenHeight = controller.layout.screenFrame.height - controller.layout.notch.height
         let target = min(height, screenHeight * 0.85).rounded(.up)
@@ -106,7 +140,7 @@ final class IslandCoordinator {
     }
 
     private func openDashboard(_ section: DashboardSection) {
-        controller?.collapse()
+        controllers.values.forEach { $0.collapse() }
         DashboardLauncher.shared.open(section)
     }
 
@@ -131,7 +165,7 @@ final class IslandCoordinator {
         } onChange: { [weak self] in
             Task { @MainActor in self?.trackSnapshot() }
         }
-        guard let snapshot, controller != nil else { return }
+        guard let snapshot, isEnabled else { return }
         let activities = watcher.observe(
             snapshot,
             threshold: preferences.providerLimitAlertThreshold,
@@ -148,7 +182,7 @@ final class IslandCoordinator {
             Task { @MainActor in self?.trackKeepAwake() }
         }
         defer { lastAwakeMode = mode }
-        if controller != nil, let activity = IslandActivity.keepAwake(from: lastAwakeMode, to: mode) {
+        if isEnabled, let activity = IslandActivity.keepAwake(from: lastAwakeMode, to: mode) {
             queue.enqueue(activity)
         }
     }
@@ -159,8 +193,9 @@ final class IslandCoordinator {
         } onChange: { [weak self] in
             Task { @MainActor in self?.trackQueue() }
         }
-        if let current, let controller {
-            controller.present(current, for: queue.duration(for: current))
+        if let current {
+            let duration = queue.duration(for: current)
+            controllers.values.forEach { $0.present(current, for: duration) }
         }
     }
 }

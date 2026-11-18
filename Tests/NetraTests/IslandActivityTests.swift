@@ -194,7 +194,11 @@ final class IslandActivityDetectorTests: XCTestCase {
         roster.accounts = [ManagedAccount(id: UUID(), identity: identity, addedAt: now)]
         let store = AccountStore(preview: roster, live: [.codex: identity])
         let activity = IslandActivity.accountSwitched(provider: .codex, in: store, at: now)
-        XCTAssertEqual(activity?.kind, .accountSwitched(accountLabel: store.roster.label(for: roster.accounts[0])))
+        // The account now in use rides along, so the island can show its
+        // face and room; nothing was switched away from in a preview store.
+        XCTAssertEqual(activity?.kind, .accountSwitched(
+            accountLabel: store.roster.label(for: roster.accounts[0]), account: roster.accounts[0], previous: nil
+        ))
         XCTAssertNil(IslandActivity.accountSwitched(provider: .claude, in: store, at: now))
     }
 

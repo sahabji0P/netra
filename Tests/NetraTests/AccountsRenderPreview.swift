@@ -37,12 +37,6 @@ final class AccountsRenderPreview: XCTestCase {
             accounts: accounts, rendersFullHeight: true
         )
         render(menu, name: "accounts-menu", outputDir: outputDir)
-        for provider in [AccountProvider.claude, .codex] {
-            render(
-                AccountSwitcherList(accounts: accounts, provider: provider, showRemaining: true, manage: {}),
-                name: "accounts-switcher-\(provider.rawValue)", outputDir: outputDir
-            )
-        }
     }
 
     // MARK: Synthetic data
@@ -72,11 +66,11 @@ final class AccountsRenderPreview: XCTestCase {
 
     static func previewAccounts(withNotice: Bool) -> AccountStore {
         let now = Date.now
-        func limits(_ short: Double, _ weekly: Double, ago: TimeInterval, shortReset: TimeInterval = 3600) -> AccountLimitsRecord {
+        func limits(_ short: Double, _ weekly: Double, ago: TimeInterval, shortReset: TimeInterval = 3600, longLabel: String = "weekly") -> AccountLimitsRecord {
             AccountLimitsRecord(
                 windows: [
                     QuotaWindow(label: "5h", usedPercent: short, resetsAt: now.addingTimeInterval(shortReset), durationSeconds: 5 * 3600),
-                    QuotaWindow(label: "weekly", usedPercent: weekly, resetsAt: now.addingTimeInterval(3 * 86400), durationSeconds: 7 * 86400),
+                    QuotaWindow(label: longLabel, usedPercent: weekly, resetsAt: now.addingTimeInterval(3 * 86400), durationSeconds: 7 * 86400),
                 ],
                 observedAt: now.addingTimeInterval(-ago), isLive: true
             )
@@ -88,7 +82,9 @@ final class AccountsRenderPreview: XCTestCase {
             ManagedAccount(id: UUID(), identity: claudePersonal, nickname: "Personal", addedAt: now.addingTimeInterval(-86400 * 5),
                            lastActiveAt: now.addingTimeInterval(-3 * 3600), lastLimits: limits(88, 34, ago: 3 * 3600, shortReset: -600)),
             ManagedAccount(id: UUID(), identity: claudeSide, addedAt: now.addingTimeInterval(-86400 * 2),
-                           lastActiveAt: now.addingTimeInterval(-26 * 3600), lastLimits: limits(12, 93, ago: 26 * 3600),
+                           lastActiveAt: now.addingTimeInterval(-26 * 3600),
+                           // A long window name at 100%: the tightest fit for a row's meters.
+                           lastLimits: limits(12, 100, ago: 26 * 3600, longLabel: "weekly · Fable"),
                            signInExpiresAt: now.addingTimeInterval(2 * 86400)),
             ManagedAccount(id: UUID(), identity: codexMain, addedAt: now.addingTimeInterval(-86400 * 4),
                            lastActiveAt: now, lastLimits: limits(20, 40, ago: 90)),

@@ -179,14 +179,81 @@ struct IslandCompactContent: View {
 
 // MARK: - Live activity
 
+/// An account switch, drawn as a hand-over rather than as an alert: the
+/// account that was in use fades to the left, the new one stands in its
+/// provider's color with its name, and the room it has is on the right.
+struct IslandAccountSwitchView: View {
+    var label: String
+    var account: ManagedAccount
+    var previous: ManagedAccount?
+    var showRemaining: Bool
+
+    var body: some View {
+        let agent = account.provider.agent
+        let color = AgentPalette.color(for: agent)
+        HStack(spacing: 10) {
+            HStack(spacing: 5) {
+                if let previous {
+                    AccountAvatar(account: previous, size: 20)
+                        .saturation(0)
+                        .opacity(0.45)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                }
+                AccountAvatar(account: account, size: 32)
+                    .padding(3)
+                    .overlay { Circle().strokeBorder(color, lineWidth: 1.5) }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                HStack(spacing: 4) {
+                    ProviderLogo(agent: agent, size: 10)
+                    Text(([AgentPalette.shortName(agent), "now in use"] + [account.identity.plan].compactMap { $0 })
+                        .joined(separator: " · "))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(IslandTheme.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 6)
+            HStack(spacing: 8) {
+                ForEach(AccountText.glanceWindows(account.parkedWindows(now: .now)), id: \.self) { parked in
+                    AccountMiniMeter(parked: parked, agent: agent, showRemaining: showRemaining, width: 52)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Switched \(AgentPalette.shortName(agent)) to \(label)")
+    }
+}
+
 /// The island grown for one event. Every kind shares one height so the
 /// shell's morph never jumps between kinds.
 struct IslandActivityView: View {
     var activity: IslandActivity
+    /// Whether meters count what is left, like the bars everywhere else.
+    var showRemaining = false
 
     static let height: CGFloat = 64
 
     var body: some View {
+        if case .accountSwitched(let label, let account?, let previous) = activity.kind {
+            IslandAccountSwitchView(label: label, account: account, previous: previous, showRemaining: showRemaining)
+                .frame(height: Self.height)
+        } else {
+            standard
+        }
+    }
+
+    private var standard: some View {
         HStack(spacing: 12) {
             mark
             VStack(alignment: .leading, spacing: 2) {
@@ -256,7 +323,7 @@ struct IslandActivityView: View {
             return alternative.map { "\(window) · \($0) has room left" } ?? window
         case .windowReset:
             return "A new window started with your full limit"
-        case .accountSwitched(let label):
+        case .accountSwitched(let label, _, _):
             return "Now signed in as \(label)"
         case .keepAwake(let isOn, let until):
             guard isOn else { return "Your Mac can sleep normally" }
